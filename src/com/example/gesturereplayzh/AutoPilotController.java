@@ -337,8 +337,7 @@ final class AutoPilotController {
             );
             return;
         }
-        AutoSettings settings = AutoSettings.load(service);
-        List<GestureLayer> catchLayers = loadCatchLayers(settings);
+        List<GestureLayer> catchLayers = GestureStore.load(service);
         if (catchLayers.isEmpty()) {
             service.autoStatus("選定的捕捉手勢不存在，已停止自動辨識");
             stop();
@@ -398,22 +397,6 @@ final class AutoPilotController {
                     }
                 }
         );
-    }
-
-    private List<GestureLayer> loadCatchLayers(AutoSettings settings) {
-        if (settings.catchGestureSourceId == null ||
-                AutoSettings.CURRENT_GESTURE_SOURCE.equals(
-                        settings.catchGestureSourceId
-                )) {
-            return GestureStore.load(service);
-        }
-        for (SavedVersionStore.SavedVersion version :
-                SavedVersionStore.load(service)) {
-            if (version.id.equals(settings.catchGestureSourceId)) {
-                return SavedVersionStore.copyLayers(version.layers);
-            }
-        }
-        return GestureStore.load(service);
     }
 
     private void confirmEncounterAndRetry(int token, int retryCount) {

@@ -15,8 +15,6 @@ import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
-import android.widget.ArrayAdapter;
-import android.widget.Spinner;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -680,37 +678,14 @@ public final class MainActivity extends Activity {
                 "退出 Y 座標（螢幕百分比）",
                 settings.exitYRatio * 100f
         );
-        fields.addView(text("捕捉手勢來源", 13f, 0xFF555555));
-        List<SavedVersionStore.SavedVersion> availableVersions =
-                SavedVersionStore.load(this);
-        List<String> sourceIds = new java.util.ArrayList<>();
-        List<String> sourceLabels = new java.util.ArrayList<>();
-        sourceIds.add(AutoSettings.CURRENT_GESTURE_SOURCE);
-        sourceLabels.add(
-                "目前套用手勢（" + GestureStore.load(this).size() + " 條）"
+        TextView catchSourceNotice = text(
+                "捕捉手勢來源固定為本實驗版主畫面的「目前手勢」，" +
+                        "不會讀取任何保存版本。",
+                14f,
+                0xFF1B5E20
         );
-        int selectedSource = 0;
-        for (SavedVersionStore.SavedVersion version : availableVersions) {
-            if (version.layers.isEmpty()) {
-                continue;
-            }
-            sourceIds.add(version.id);
-            sourceLabels.add(
-                    "保存版本：" + version.name +
-                            "（" + version.layers.size() + " 條）"
-            );
-            if (version.id.equals(settings.catchGestureSourceId)) {
-                selectedSource = sourceIds.size() - 1;
-            }
-        }
-        Spinner catchGestureSource = new Spinner(this);
-        catchGestureSource.setAdapter(new ArrayAdapter<>(
-                this,
-                android.R.layout.simple_spinner_dropdown_item,
-                sourceLabels
-        ));
-        catchGestureSource.setSelection(selectedSource);
-        fields.addView(catchGestureSource);
+        catchSourceNotice.setPadding(dp(8), dp(12), dp(8), dp(12));
+        fields.addView(catchSourceNotice);
 
         LinearLayout actions = new LinearLayout(this);
         actions.setOrientation(LinearLayout.HORIZONTAL);
@@ -766,7 +741,7 @@ public final class MainActivity extends Activity {
             settings.exitYRatio =
                     percentage(exitY, settings.exitYRatio);
             settings.catchGestureSourceId =
-                    sourceIds.get(catchGestureSource.getSelectedItemPosition());
+                    AutoSettings.CURRENT_GESTURE_SOURCE;
             settings.save(this);
             dialog.dismiss();
             refreshCatchGestureInfo();
@@ -789,36 +764,15 @@ public final class MainActivity extends Activity {
         if (catchGestureInfo == null) {
             return;
         }
-        AutoSettings settings = AutoSettings.load(this);
-        List<GestureLayer> selectedLayers;
-        String sourceName = "目前套用手勢";
-        if (AutoSettings.CURRENT_GESTURE_SOURCE.equals(
-                settings.catchGestureSourceId
-        )) {
-            selectedLayers = GestureStore.load(this);
-        } else {
-            selectedLayers = null;
-            for (SavedVersionStore.SavedVersion version :
-                    SavedVersionStore.load(this)) {
-                if (version.id.equals(settings.catchGestureSourceId)) {
-                    sourceName = "保存版本「" + version.name + "」";
-                    selectedLayers = version.layers;
-                    break;
-                }
-            }
-            if (selectedLayers == null) {
-                sourceName = "目前套用手勢（原保存版本已不存在）";
-                selectedLayers = GestureStore.load(this);
-            }
-        }
+        List<GestureLayer> selectedLayers = GestureStore.load(this);
         long totalDuration = GestureIdentity.totalDuration(selectedLayers);
         catchGestureInfo.setText(
-                "自動捕捉來源：" + sourceName + "\n" +
+                "自動捕捉來源：本實驗版目前手勢（固定）\n" +
                         "實際會播放 " + selectedLayers.size() +
                         " 條軌跡，總長 " + formatSeconds(totalDuration) +
                         " 秒，識別碼 " +
                         GestureIdentity.fingerprint(selectedLayers) + "。\n" +
-                        "修改目前軌跡後會自動改用目前手勢；一般版與實驗版資料不共用。"
+                        "自動模式不再讀取任何保存版本；一般版與實驗版資料不共用。"
         );
     }
 
