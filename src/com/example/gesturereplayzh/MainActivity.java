@@ -560,14 +560,31 @@ public final class MainActivity extends Activity {
 
     private void showAutoSettingsDialog() {
         AutoSettings settings = AutoSettings.load(this);
-        ScrollView scroll = new ScrollView(this);
-        int dialogContentHeight = Math.round(
-                getResources().getDisplayMetrics().heightPixels * 0.52f
-        );
-        scroll.setLayoutParams(new LinearLayout.LayoutParams(
+        LinearLayout dialogContent = new LinearLayout(this);
+        dialogContent.setOrientation(LinearLayout.VERTICAL);
+        dialogContent.setPadding(dp(8), 0, dp(8), dp(8));
+        dialogContent.setLayoutParams(new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                dialogContentHeight
+                Math.round(
+                        getResources().getDisplayMetrics().heightPixels * 0.72f
+                )
         ));
+
+        TextView explanation = text(
+                "畫面辨識條件不可修改；以下操作參數都可修改。",
+                14f,
+                0xFF555555
+        );
+        explanation.setPadding(dp(12), dp(6), dp(12), dp(6));
+        dialogContent.addView(explanation);
+
+        ScrollView scroll = new ScrollView(this);
+        LinearLayout.LayoutParams scrollParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                0,
+                1f
+        );
+        dialogContent.addView(scroll, scrollParams);
         LinearLayout fields = new LinearLayout(this);
         fields.setOrientation(LinearLayout.VERTICAL);
         fields.setPadding(dp(20), dp(8), dp(20), dp(8));
@@ -675,47 +692,77 @@ public final class MainActivity extends Activity {
         catchGestureSource.setSelection(selectedSource);
         fields.addView(catchGestureSource);
 
-        new AlertDialog.Builder(this)
+        LinearLayout actions = new LinearLayout(this);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        actions.setGravity(Gravity.CENTER_VERTICAL);
+        actions.setPadding(dp(4), dp(4), dp(4), 0);
+        Button reset = compactButton("恢復預設");
+        Button cancel = compactButton("取消");
+        Button save = compactButton("保存");
+        actions.addView(reset);
+        actions.addView(cancel);
+        actions.addView(save);
+        dialogContent.addView(actions);
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle("全自動操作設定")
-                .setMessage("畫面辨識條件不可修改；以下操作參數都可修改。")
-                .setView(scroll)
-                .setNeutralButton("恢復預設", (dialog, which) -> {
-                    AutoSettings.reset(this);
-                    toast("已恢復預設操作設定");
-                })
-                .setNegativeButton("取消", null)
-                .setPositiveButton("保存", (dialog, which) -> {
-                    settings.scanDescription =
-                            nonEmpty(scanDescription, settings.scanDescription);
-                    settings.encounterDescription =
-                            nonEmpty(encounterDescription, settings.encounterDescription);
-                    settings.rocketDescription =
-                            nonEmpty(rocketDescription, settings.rocketDescription);
-                    settings.exitDescription =
-                            nonEmpty(exitDescription, settings.exitDescription);
-                    settings.scanIntervalMs = seconds(scanInterval, settings.scanIntervalMs);
-                    settings.rocketTapIntervalMs =
-                            seconds(rocketInterval, settings.rocketTapIntervalMs);
-                    settings.beforeCatchMs = seconds(beforeCatch, settings.beforeCatchMs);
-                    settings.afterCatchMs = seconds(afterCatch, settings.afterCatchMs);
-                    settings.afterExitMs = seconds(afterExit, settings.afterExitMs);
-                    settings.rocketTapCount =
-                            integerValue(rocketCount, settings.rocketTapCount, 1, 5);
-                    settings.rocketTapXRatio =
-                            percentage(rocketX, settings.rocketTapXRatio);
-                    settings.rocketTapYRatio =
-                            percentage(rocketY, settings.rocketTapYRatio);
-                    settings.exitXRatio =
-                            percentage(exitX, settings.exitXRatio);
-                    settings.exitYRatio =
-                            percentage(exitY, settings.exitYRatio);
-                    settings.catchGestureSourceId =
-                            sourceIds.get(catchGestureSource.getSelectedItemPosition());
-                    settings.save(this);
-                    refreshCatchGestureInfo();
-                    toast("已保存全自動操作設定");
-                })
-                .show();
+                .setView(dialogContent)
+                .create();
+
+        reset.setOnClickListener(v -> {
+            AutoSettings.reset(this);
+            dialog.dismiss();
+            refreshCatchGestureInfo();
+            toast("已恢復預設操作設定");
+        });
+        cancel.setOnClickListener(v -> dialog.dismiss());
+        save.setOnClickListener(v -> {
+            settings.scanDescription =
+                    nonEmpty(scanDescription, settings.scanDescription);
+            settings.encounterDescription =
+                    nonEmpty(encounterDescription, settings.encounterDescription);
+            settings.rocketDescription =
+                    nonEmpty(rocketDescription, settings.rocketDescription);
+            settings.exitDescription =
+                    nonEmpty(exitDescription, settings.exitDescription);
+            settings.scanIntervalMs =
+                    seconds(scanInterval, settings.scanIntervalMs);
+            settings.rocketTapIntervalMs =
+                    seconds(rocketInterval, settings.rocketTapIntervalMs);
+            settings.beforeCatchMs =
+                    seconds(beforeCatch, settings.beforeCatchMs);
+            settings.afterCatchMs =
+                    seconds(afterCatch, settings.afterCatchMs);
+            settings.afterExitMs =
+                    seconds(afterExit, settings.afterExitMs);
+            settings.rocketTapCount =
+                    integerValue(rocketCount, settings.rocketTapCount, 1, 5);
+            settings.rocketTapXRatio =
+                    percentage(rocketX, settings.rocketTapXRatio);
+            settings.rocketTapYRatio =
+                    percentage(rocketY, settings.rocketTapYRatio);
+            settings.exitXRatio =
+                    percentage(exitX, settings.exitXRatio);
+            settings.exitYRatio =
+                    percentage(exitY, settings.exitYRatio);
+            settings.catchGestureSourceId =
+                    sourceIds.get(catchGestureSource.getSelectedItemPosition());
+            settings.save(this);
+            dialog.dismiss();
+            refreshCatchGestureInfo();
+            toast("已保存全自動操作設定");
+        });
+        dialog.show();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setLayout(
+                    Math.round(
+                            getResources().getDisplayMetrics().widthPixels * 0.94f
+                    ),
+                    Math.round(
+                            getResources().getDisplayMetrics().heightPixels * 0.86f
+                    )
+            );
+        }
     }
 
     private void refreshCatchGestureInfo() {
