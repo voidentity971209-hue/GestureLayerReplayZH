@@ -10,6 +10,11 @@ import java.util.Arrays;
 import java.util.List;
 
 final class AutoScreenAnalyzer {
+    private static final float PLAYER_CENTER_X_RATIO = 0.50f;
+    private static final float PLAYER_CENTER_Y_RATIO = 0.63f;
+    private static final float POKEMON_RADIUS_BY_WIDTH = 0.38f;
+    private static final float STOP_RADIUS_BY_WIDTH = 0.40f;
+
     enum ScreenState {
         ENCOUNTER,
         HAS_CLOSE_BUTTON,
@@ -293,16 +298,16 @@ final class AutoScreenAnalyzer {
         boolean blueStop =
                 local.cyanRatio > 0.22f &&
                         local.cyanRatio > local.warmRatio * 1.65f &&
-                        objectHeight > height * 0.018f;
+                        objectHeight > height * 0.025f;
         float aspectRatio = objectHeight / (float) Math.max(1, objectWidth);
         boolean personLike =
                 objectHeight > height * 0.050f &&
                         aspectRatio > 2.15f;
         boolean pokemonLike =
-                confidence >= 0.40f &&
-                        local.edgeRatio >= 0.13f &&
-                        compactness >= 0.22f &&
-                        component.activeCells >= 4 &&
+                confidence >= 0.30f &&
+                        local.edgeRatio >= 0.10f &&
+                        compactness >= 0.18f &&
+                        component.activeCells >= 3 &&
                         objectWidth >= width * 0.020f &&
                         objectWidth <= width * 0.15f &&
                         objectHeight >= height * 0.012f &&
@@ -315,6 +320,9 @@ final class AutoScreenAnalyzer {
             return null;
         }
         TargetType type = blueStop ? TargetType.BLUE_STOP : TargetType.POKEMON;
+        if (!isWithinPlayerRadius(type, weightedX, weightedY, width, height)) {
+            return null;
+        }
         return new TargetCandidate(
                 type,
                 new PointF(weightedX, weightedY),
@@ -569,10 +577,13 @@ final class AutoScreenAnalyzer {
 
     private static boolean looksLikeCloseButton(Bitmap bitmap) {
         RegionStats centerBottom =
-                stats(bitmap, 0.40f, 0.88f, 0.60f, 0.99f);
-        return centerBottom.redRatio < 0.075f &&
-                centerBottom.whiteRatio > 0.055f &&
-                centerBottom.blueRatio > 0.045f;
+                stats(bitmap, 0.43f, 0.885f, 0.57f, 0.995f);
+        return centerBottom.redRatio < 0.10f &&
+                (
+                        centerBottom.whiteRatio > 0.025f &&
+                                centerBottom.blueRatio > 0.022f ||
+                                centerBottom.blueRatio > 0.16f
+                );
     }
 
     private static boolean looksLikeMapMenu(Bitmap bitmap) {
@@ -645,9 +656,27 @@ final class AutoScreenAnalyzer {
             int width,
             int height
     ) {
-        float dx = (x - width * 0.45f) / width;
-        float dy = (y - height * 0.48f) / height;
-        return (float) Math.sqrt(dx * dx + dy * dy);
+        float dx = x - width * PLAYER_CENTER_X_RATIO;
+        float dy = y - height * PLAYER_CENTER_Y_RATIO;
+        return (float) Math.sqrt(dx * dx + dy * dy) /
+                Math.max(1f, width * STOP_RADIUS_BY_WIDTH);
+    }
+
+    private static boolean isWithinPlayerRadius(
+            TargetType type,
+            float x,
+            float y,
+            int width,
+            int height
+    ) {
+        float radius = width * (
+                type == TargetType.POKEMON
+                        ? POKEMON_RADIUS_BY_WIDTH
+                        : STOP_RADIUS_BY_WIDTH
+        );
+        float dx = x - width * PLAYER_CENTER_X_RATIO;
+        float dy = y - height * PLAYER_CENTER_Y_RATIO;
+        return dx * dx + dy * dy <= radius * radius;
     }
 
     private static int colorDifference(int first, int second) {
@@ -670,11 +699,14 @@ final class AutoScreenAnalyzer {
         }
 
         static Bounds forMap(int width, int height) {
+            int radius = Math.round(width * STOP_RADIUS_BY_WIDTH);
+            int centerX = Math.round(width * PLAYER_CENTER_X_RATIO);
+            int centerY = Math.round(height * PLAYER_CENTER_Y_RATIO);
             return new Bounds(
-                    Math.round(width * 0.05f),
-                    Math.round(height * 0.13f),
-                    Math.round(width * 0.84f),
-                    Math.round(height * 0.82f)
+                    Math.max(Math.round(width * 0.05f), centerX - radius),
+                    Math.max(Math.round(height * 0.13f), centerY - radius),
+                    Math.min(Math.round(width * 0.84f), centerX + radius),
+                    Math.min(Math.round(height * 0.86f), centerY + radius)
             );
         }
     }

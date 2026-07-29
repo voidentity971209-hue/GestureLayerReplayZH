@@ -8,6 +8,7 @@ import android.graphics.Path;
 import android.graphics.Point;
 import android.graphics.PixelFormat;
 import android.graphics.PointF;
+import android.graphics.Rect;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.Gravity;
@@ -75,6 +76,21 @@ public final class GestureAccessibilityService extends AccessibilityService {
                 clickable.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
             lastDrivingConfirmationAt = System.currentTimeMillis();
             autoPilotController.onDrivingPromptConfirmed();
+            return;
+        }
+        Rect bounds = new Rect();
+        confirmation.getBoundsInScreen(bounds);
+        if (!bounds.isEmpty()) {
+            lastDrivingConfirmationAt = System.currentTimeMillis();
+            dispatchAutoTap(
+                    bounds.exactCenterX(),
+                    bounds.exactCenterY(),
+                    () -> {
+                        if (autoPilotController != null) {
+                            autoPilotController.onDrivingPromptConfirmed();
+                        }
+                    }
+            );
         }
     }
 

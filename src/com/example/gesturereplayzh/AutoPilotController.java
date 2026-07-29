@@ -47,7 +47,7 @@ final class AutoPilotController {
         generation++;
         blockedPoints.clear();
         service.autoStatus("自動辨識已啟動：請保持最大視野、最高角度");
-        scheduleScan(500L, generation);
+        scheduleCycle(500L, generation);
     }
 
     void stop() {
@@ -61,7 +61,63 @@ final class AutoPilotController {
         lastTarget = null;
     }
 
-    private void scheduleScan(long delayMs, int token) {
+    private void scheduleCycle(long delayMs, int token) {
+        if (!isCurrent(token)) {
+            return;
+        }
+        handler.postDelayed(() -> inspectCurrentScreen(token, 0), delayMs);
+    }
+
+    private void inspectCurrentScreen(int token, int unknownCount) {
+        if (!isCurrent(token)) {
+            return;
+        }
+        takeScreenshot(token, bitmap -> {
+            AutoScreenAnalyzer.ScreenState state =
+                    AutoScreenAnalyzer.classifyAfterTap(bitmap, null);
+            AutoSettings settings = AutoSettings.load(service);
+            int width = bitmap.getWidth();
+            int height = bitmap.getHeight();
+            recycle(bitmap);
+            switch (state) {
+                case ENCOUNTER:
+                    service.autoStatus(settings.encounterDescription);
+                    handler.postDelayed(
+                            () -> playCatchGesture(token, 0),
+                            settings.beforeCatchMs
+                    );
+                    break;
+                case HAS_CLOSE_BUTTON:
+                    service.autoStatus(settings.exitDescription);
+                    service.dispatchAutoTap(
+                            width * settings.exitXRatio,
+                            height * settings.exitYRatio,
+                            () -> scheduleCycle(settings.afterExitMs, token)
+                    );
+                    break;
+                case MAP_RETURNED:
+                    scheduleMapScan(0L, token);
+                    break;
+                case ROCKET_DIALOG:
+                default:
+                    if (unknownCount >= 8) {
+                        service.autoStatus(settings.rocketDescription);
+                        runRocketTap(token, 0);
+                    } else {
+                        handler.postDelayed(
+                                () -> inspectCurrentScreen(
+                                        token,
+                                        unknownCount + 1
+                                ),
+                                OPEN_SCREEN_POLL_MS
+                        );
+                    }
+                    break;
+            }
+        });
+    }
+
+    private void scheduleMapScan(long delayMs, int token) {
         if (!isCurrent(token)) {
             return;
         }
@@ -97,7 +153,7 @@ final class AutoPilotController {
         Bitmap lastFrame = mapFrames.get(mapFrames.size() - 1);
         if (target == null) {
             recycleMapFrames();
-            scheduleScan(AutoSettings.load(service).scanIntervalMs, token);
+            scheduleCycle(AutoSettings.load(service).scanIntervalMs, token);
             return;
         }
 
@@ -135,7 +191,7 @@ final class AutoPilotController {
         mapBeforeTap = null;
         lastTarget = null;
         service.autoStatus("已確認不是駕駛，2 秒後重新掃描");
-        scheduleScan(POST_TAP_CLASSIFY_DELAY_MS, token);
+        scheduleCycle(POST_TAP_CLASSIFY_DELAY_MS, token);
     }
 
     private void inspectOpenedScreen(
@@ -177,7 +233,7 @@ final class AutoPilotController {
                     mapBeforeTap = null;
                     blockLastTarget();
                     service.autoStatus("已返回地圖，繼續掃描");
-                    scheduleScan(settings.scanIntervalMs, token);
+                    scheduleCycle(settings.scanIntervalMs, token);
                     break;
                 case HAS_CLOSE_BUTTON:
                     int width = bitmap.getWidth();
@@ -189,7 +245,7 @@ final class AutoPilotController {
                     service.dispatchAutoTap(
                             width * settings.exitXRatio,
                             height * settings.exitYRatio,
-                            () -> scheduleScan(settings.afterExitMs, token)
+                            () -> scheduleCycle(settings.afterExitMs, token)
                     );
                     break;
                 case ROCKET_DIALOG:
@@ -223,7 +279,7 @@ final class AutoPilotController {
     ) {
         if (pollCount + 1 >= MAX_OPEN_SCREEN_POLLS) {
             blockLastTarget();
-            scheduleScan(AutoSettings.load(service).scanIntervalMs, token);
+            scheduleCycle(AutoSettings.load(service).scanIntervalMs, token);
             return;
         }
         handler.postDelayed(
@@ -247,7 +303,7 @@ final class AutoPilotController {
             service.dispatchAutoTap(
                     screen.x * settings.exitXRatio,
                     screen.y * settings.exitYRatio,
-                    () -> scheduleScan(settings.afterExitMs, token)
+                    () -> scheduleCycle(settings.afterExitMs, token)
             );
             return;
         }
@@ -282,7 +338,7 @@ final class AutoPilotController {
                         service.autoStatus("捕捉手勢已完成");
                         AutoSettings settings = AutoSettings.load(service);
                         handler.postDelayed(
-                                () -> scheduleScan(
+                                () -> scheduleCycle(
                                         settings.scanIntervalMs,
                                         token
                                 ),
@@ -303,7 +359,7 @@ final class AutoPilotController {
                             );
                         } else {
                             service.autoStatus("捕捉手勢再次取消，繼續掃描");
-                            scheduleScan(
+                            scheduleCycle(
                                     AutoSettings.load(service).scanIntervalMs,
                                     token
                             );
@@ -371,7 +427,7 @@ final class AutoPilotController {
                         buffer.close();
                         if (bitmap == null) {
                             service.autoStatus("無法讀取畫面，稍後重試");
-                            scheduleScan(1200L, token);
+                            scheduleCycle(1200L, token);
                             return;
                         }
                         receiver.receive(bitmap);
@@ -390,7 +446,7 @@ final class AutoPilotController {
                                 );
                             } else {
                                 screenshotFailures = 0;
-                                scheduleScan(1400L, token);
+                                scheduleCycle(1400L, token);
                             }
                         }
                     }
