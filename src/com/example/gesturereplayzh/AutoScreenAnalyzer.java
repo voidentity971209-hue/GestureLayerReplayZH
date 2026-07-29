@@ -294,6 +294,26 @@ final class AutoScreenAnalyzer {
                 local.cyanRatio > 0.22f &&
                         local.cyanRatio > local.warmRatio * 1.65f &&
                         objectHeight > height * 0.018f;
+        float aspectRatio = objectHeight / (float) Math.max(1, objectWidth);
+        boolean personLike =
+                objectHeight > height * 0.050f &&
+                        aspectRatio > 2.15f;
+        boolean pokemonLike =
+                confidence >= 0.40f &&
+                        local.edgeRatio >= 0.13f &&
+                        compactness >= 0.22f &&
+                        component.activeCells >= 4 &&
+                        objectWidth >= width * 0.020f &&
+                        objectWidth <= width * 0.15f &&
+                        objectHeight >= height * 0.012f &&
+                        objectHeight <= height * 0.085f &&
+                        !personLike;
+        if (!blueStop && !pokemonLike) {
+            return null;
+        }
+        if (blueStop && confidence < 0.25f) {
+            return null;
+        }
         TargetType type = blueStop ? TargetType.BLUE_STOP : TargetType.POKEMON;
         return new TargetCandidate(
                 type,

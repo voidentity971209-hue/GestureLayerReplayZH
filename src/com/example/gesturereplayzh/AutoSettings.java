@@ -11,7 +11,6 @@ final class AutoSettings {
     String rocketDescription;
     String exitDescription;
     long scanIntervalMs;
-    long afterTargetTapMs;
     long rocketTapIntervalMs;
     long beforeCatchMs;
     long afterCatchMs;
@@ -47,11 +46,6 @@ final class AutoSettings {
                 values,
                 "scanIntervalMs",
                 settings.scanIntervalMs
-        );
-        settings.afterTargetTapMs = readTime(
-                values,
-                "afterTargetTapMs",
-                settings.afterTargetTapMs
         );
         settings.rocketTapIntervalMs = readTime(
                 values,
@@ -112,7 +106,6 @@ final class AutoSettings {
                 .putString("rocketDescription", rocketDescription)
                 .putString("exitDescription", exitDescription)
                 .putLong("scanIntervalMs", normalizeTime(scanIntervalMs))
-                .putLong("afterTargetTapMs", normalizeTime(afterTargetTapMs))
                 .putLong("rocketTapIntervalMs", normalizeTime(rocketTapIntervalMs))
                 .putLong("beforeCatchMs", normalizeTime(beforeCatchMs))
                 .putLong("afterCatchMs", normalizeTime(afterCatchMs))
@@ -140,7 +133,6 @@ final class AutoSettings {
         settings.rocketDescription = "火箭隊對話點擊兩次，每次相隔 0.6 秒，再退出";
         settings.exitDescription = "非捕捉畫面等待後按下方 X 返回地圖";
         settings.scanIntervalMs = 800L;
-        settings.afterTargetTapMs = 1000L;
         settings.rocketTapIntervalMs = 600L;
         settings.beforeCatchMs = 300L;
         settings.afterCatchMs = 6500L;

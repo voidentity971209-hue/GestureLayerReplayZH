@@ -15,6 +15,7 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
 import android.view.accessibility.AccessibilityEvent;
+import android.view.accessibility.AccessibilityNodeInfo;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.Toast;
@@ -38,6 +39,7 @@ public final class GestureAccessibilityService extends AccessibilityService {
     private boolean gestureInFlight;
     private AutoPilotController autoPilotController;
     private Button autoControlButton;
+    private long lastDrivingConfirmationAt;
 
     static GestureAccessibilityService getInstance() {
         return instance;
@@ -47,7 +49,6 @@ public final class GestureAccessibilityService extends AccessibilityService {
     protected void onServiceConnected() {
         instance = this;
         if (isExperimentalBuild()) {
-            CatchGestureStore.ensureInstalled(this);
             autoPilotController = new AutoPilotController(this);
         }
         showFloatingControls();
@@ -56,7 +57,59 @@ public final class GestureAccessibilityService extends AccessibilityService {
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
-        // This service does not inspect screen contents.
+        if (autoPilotController == null ||
+                !autoPilotController.isActive() ||
+                System.currentTimeMillis() - lastDrivingConfirmationAt < 5000L) {
+            return;
+        }
+        AccessibilityNodeInfo root = getRootInActiveWindow();
+        AccessibilityNodeInfo confirmation = findDrivingConfirmation(root);
+        if (confirmation == null) {
+            return;
+        }
+        AccessibilityNodeInfo clickable = confirmation;
+        while (clickable != null && !clickable.isClickable()) {
+            clickable = clickable.getParent();
+        }
+        if (clickable != null &&
+                clickable.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+            lastDrivingConfirmationAt = System.currentTimeMillis();
+            autoPilotController.onDrivingPromptConfirmed();
+        }
+    }
+
+    private AccessibilityNodeInfo findDrivingConfirmation(
+            AccessibilityNodeInfo node
+    ) {
+        if (node == null) {
+            return null;
+        }
+        if (isDrivingConfirmationText(node.getText()) ||
+                isDrivingConfirmationText(node.getContentDescription())) {
+            return node;
+        }
+        for (int i = 0; i < node.getChildCount(); i++) {
+            AccessibilityNodeInfo found =
+                    findDrivingConfirmation(node.getChild(i));
+            if (found != null) {
+                return found;
+            }
+        }
+        return null;
+    }
+
+    private boolean isDrivingConfirmationText(CharSequence value) {
+        if (value == null) {
+            return false;
+        }
+        String text = value.toString().toLowerCase(java.util.Locale.ROOT);
+        return text.contains("我不是駕駛") ||
+                text.contains("我沒有在駕駛") ||
+                text.contains("我是乘客") ||
+                text.contains("i'm a passenger") ||
+                text.contains("i’m a passenger") ||
+                text.contains("im a passenger") ||
+                text.contains("sou passageiro");
     }
 
     @Override

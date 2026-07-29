@@ -15,6 +15,7 @@ import java.util.List;
 final class AutoPilotController {
     private static final int MAP_FRAME_COUNT = 3;
     private static final long MAP_FRAME_GAP_MS = 450L;
+    private static final long POST_TAP_CLASSIFY_DELAY_MS = 2000L;
     private static final long OPEN_SCREEN_POLL_MS = 400L;
     private static final int MAX_OPEN_SCREEN_POLLS = 9;
     private static final int REQUIRED_ENCOUNTER_POLLS = 2;
@@ -115,14 +116,26 @@ final class AutoPilotController {
         service.dispatchAutoTap(
                 target.point.x,
                 target.point.y,
-                () -> {
-                    AutoSettings settings = AutoSettings.load(service);
-                    handler.postDelayed(
-                            () -> inspectOpenedScreen(token, 0, 0, 0),
-                            settings.afterTargetTapMs
-                    );
-                }
+                () -> handler.postDelayed(
+                        () -> inspectOpenedScreen(token, 0, 0, 0),
+                        POST_TAP_CLASSIFY_DELAY_MS
+                )
         );
+    }
+
+    void onDrivingPromptConfirmed() {
+        if (!active) {
+            return;
+        }
+        generation++;
+        int token = generation;
+        screenshotPending = false;
+        handler.removeCallbacksAndMessages(null);
+        recycleMapFrames();
+        mapBeforeTap = null;
+        lastTarget = null;
+        service.autoStatus("已確認不是駕駛，2 秒後重新掃描");
+        scheduleScan(POST_TAP_CLASSIFY_DELAY_MS, token);
     }
 
     private void inspectOpenedScreen(
@@ -252,9 +265,9 @@ final class AutoPilotController {
         if (!isCurrent(token)) {
             return;
         }
-        List<GestureLayer> catchLayers = CatchGestureStore.load(service);
+        List<GestureLayer> catchLayers = GestureStore.load(service);
         if (catchLayers.isEmpty()) {
-            service.autoStatus("捕捉手勢不存在，已停止自動辨識");
+            service.autoStatus("目前套用的手勢不存在，已停止自動辨識");
             stop();
             return;
         }

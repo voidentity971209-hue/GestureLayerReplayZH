@@ -45,9 +45,6 @@ public final class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         BuiltInGestureStore.ensureInstalled(this);
-        if (isExperimentalBuild()) {
-            CatchGestureStore.ensureInstalled(this);
-        }
         buildUi();
     }
 
@@ -113,30 +110,13 @@ public final class MainActivity extends Activity {
             root.addView(autoSettings);
 
             TextView catchGestureInfo = text(
-                    "預設捕捉手勢：原地速量留刪除前 4 條後的剩餘 5 條軌跡；" +
-                            "起點自動換算為 0.0、0.2、1.2、1.4、1.6 秒，" +
-                            "並與一般手勢版本分開保存。",
+                    "自動捕捉會直接播放主畫面目前套用的手勢。" +
+                            "你可以修改軌跡、起點、長度與順序，或先套用任一保存版本。",
                     14f,
                     0xFF455A64
             );
             catchGestureInfo.setPadding(dp(12), dp(8), dp(12), dp(8));
             root.addView(catchGestureInfo);
-
-            Button restoreCatchGesture = button("恢復預設捕捉手勢");
-            restoreCatchGesture.setOnClickListener(v ->
-                    new AlertDialog.Builder(this)
-                            .setTitle("恢復預設捕捉手勢？")
-                            .setMessage(
-                                    "將捕捉手勢恢復為「原地速量留」刪除前 4 條後" +
-                                            "剩餘的 5 條軌跡。一般手勢與保存版本不受影響。"
-                            )
-                            .setNegativeButton("取消", null)
-                            .setPositiveButton("恢復", (dialog, which) -> {
-                                CatchGestureStore.restoreBuiltIn(this);
-                                toast("已恢復預設捕捉手勢");
-                            })
-                            .show());
-            root.addView(restoreCatchGesture);
         }
 
         Button accessibility = button("開啟無障礙服務設定");
@@ -608,11 +588,6 @@ public final class MainActivity extends Activity {
                 "掃描間隔（秒，0.1 為單位）",
                 settings.scanIntervalMs / 1000f
         );
-        EditText afterTarget = addNumberField(
-                fields,
-                "點擊候選後等待判斷（秒）",
-                settings.afterTargetTapMs / 1000f
-        );
         EditText rocketInterval = addNumberField(
                 fields,
                 "火箭隊每次對話點擊間隔（秒）",
@@ -678,7 +653,6 @@ public final class MainActivity extends Activity {
                     settings.exitDescription =
                             nonEmpty(exitDescription, settings.exitDescription);
                     settings.scanIntervalMs = seconds(scanInterval, settings.scanIntervalMs);
-                    settings.afterTargetTapMs = seconds(afterTarget, settings.afterTargetTapMs);
                     settings.rocketTapIntervalMs =
                             seconds(rocketInterval, settings.rocketTapIntervalMs);
                     settings.beforeCatchMs = seconds(beforeCatch, settings.beforeCatchMs);
