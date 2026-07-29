@@ -37,6 +37,7 @@ public final class MainActivity extends Activity {
     private TextView serviceStatus;
     private List<GestureLayer> layers;
     private List<SavedVersionStore.SavedVersion> versions;
+    private Runnable pendingPlayback;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -151,14 +152,7 @@ public final class MainActivity extends Activity {
         root.addView(playLoop);
 
         Button stop = button("停止播放");
-        stop.setOnClickListener(v -> {
-            GestureAccessibilityService service = GestureAccessibilityService.getInstance();
-            if (service != null) {
-                service.stopPlayback();
-            } else {
-                toast("服務尚未啟用");
-            }
-        });
+        stop.setOnClickListener(v -> stopPlayback());
         root.addView(stop);
 
         TextView warning = text(
@@ -170,6 +164,14 @@ public final class MainActivity extends Activity {
         root.addView(warning);
 
         setContentView(scrollView);
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (isFinishing()) {
+            stopPlayback();
+        }
+        super.onDestroy();
     }
 
     @Override
@@ -526,7 +528,30 @@ public final class MainActivity extends Activity {
             return;
         }
         moveTaskToBack(true);
-        handler.postDelayed(() -> service.play(GestureStore.load(this), loop), 1200L);
+        cancelPendingPlayback();
+        pendingPlayback = () -> {
+            pendingPlayback = null;
+            service.play(GestureStore.load(this), loop);
+        };
+        handler.postDelayed(pendingPlayback, 1200L);
+    }
+
+    private void stopPlayback() {
+        cancelPendingPlayback();
+        GestureAccessibilityService service =
+                GestureAccessibilityService.getInstance();
+        if (service != null) {
+            service.stopPlayback();
+        } else {
+            toast("服務尚未啟用");
+        }
+    }
+
+    private void cancelPendingPlayback() {
+        if (pendingPlayback != null) {
+            handler.removeCallbacks(pendingPlayback);
+            pendingPlayback = null;
+        }
     }
 
     private TextView text(String value, float size, int color) {

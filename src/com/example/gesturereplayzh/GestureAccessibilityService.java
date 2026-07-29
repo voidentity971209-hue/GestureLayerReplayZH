@@ -5,6 +5,7 @@ import android.accessibilityservice.GestureDescription;
 import android.content.Intent;
 import android.graphics.Color;
 import android.graphics.Path;
+import android.graphics.Point;
 import android.graphics.PixelFormat;
 import android.graphics.PointF;
 import android.os.Handler;
@@ -29,6 +30,7 @@ public final class GestureAccessibilityService extends AccessibilityService {
     private WindowManager windowManager;
     private View floatingControls;
     private WindowManager.LayoutParams floatingParams;
+    private boolean gestureInFlight;
 
     static GestureAccessibilityService getInstance() {
         return instance;
@@ -61,9 +63,20 @@ public final class GestureAccessibilityService extends AccessibilityService {
         super.onDestroy();
     }
 
+    @Override
+    public void onTaskRemoved(Intent rootIntent) {
+        stopPlayback();
+        super.onTaskRemoved(rootIntent);
+    }
+
     void stopPlayback() {
         generation.incrementAndGet();
         handler.removeCallbacksAndMessages(null);
+        boolean shouldCancelGesture = gestureInFlight;
+        gestureInFlight = false;
+        if (shouldCancelGesture) {
+            cancelCurrentGesture();
+        }
         toast("已停止播放");
     }
 
@@ -151,7 +164,10 @@ public final class GestureAccessibilityService extends AccessibilityService {
         playLoop.setOnClickListener(view ->
                 play(GestureStore.load(this), true));
         stop.setOnClickListener(view -> stopPlayback());
-        close.setOnClickListener(view -> hideFloatingControls());
+        close.setOnClickListener(view -> {
+            stopPlayback();
+            hideFloatingControls();
+        });
 
         floatingControls = panel;
         windowManager.addView(floatingControls, floatingParams);
@@ -199,16 +215,33 @@ public final class GestureAccessibilityService extends AccessibilityService {
 
         GestureDescription.Builder builder = new GestureDescription.Builder();
         long totalDuration = 0L;
+        Point targetScreen = ScreenDimensions.get(this);
         for (GestureLayer layer : layers) {
             if (layer.points.size() < 2) {
                 continue;
             }
+            int sourceWidth = Math.max(1, layer.sourceWidth);
+            int sourceHeight = Math.max(1, layer.sourceHeight);
+            boolean sourceLandscape = sourceWidth > sourceHeight;
+            boolean targetLandscape = targetScreen.x > targetScreen.y;
+            if (sourceLandscape != targetLandscape) {
+                toast("錄製與播放的畫面方向不同，請先旋轉手機");
+                return;
+            }
+            float scaleX = targetScreen.x / (float) sourceWidth;
+            float scaleY = targetScreen.y / (float) sourceHeight;
             Path path = new Path();
             PointF first = layer.points.get(0);
-            path.moveTo(first.x, first.y);
+            path.moveTo(
+                    scaled(first.x, scaleX, targetScreen.x),
+                    scaled(first.y, scaleY, targetScreen.y)
+            );
             for (int i = 1; i < layer.points.size(); i++) {
                 PointF point = layer.points.get(i);
-                path.lineTo(point.x, point.y);
+                path.lineTo(
+                        scaled(point.x, scaleX, targetScreen.x),
+                        scaled(point.y, scaleY, targetScreen.y)
+                );
             }
             long duration = Math.max(100L, layer.durationMs);
             long start = Math.max(0L, layer.startDelayMs);
@@ -227,6 +260,9 @@ public final class GestureAccessibilityService extends AccessibilityService {
                 new GestureResultCallback() {
                     @Override
                     public void onCompleted(GestureDescription gestureDescription) {
+                        if (token == generation.get()) {
+                            gestureInFlight = false;
+                        }
                         if (loop && token == generation.get()) {
                             handler.postDelayed(
                                     () -> dispatchLayers(layers, true, token),
@@ -238,14 +274,40 @@ public final class GestureAccessibilityService extends AccessibilityService {
                     @Override
                     public void onCancelled(GestureDescription gestureDescription) {
                         if (token == generation.get()) {
+                            gestureInFlight = false;
+                        }
+                        if (token == generation.get()) {
                             toast("手勢被系統或手動觸控取消");
                         }
                     }
                 },
                 null
         );
+        gestureInFlight = accepted;
         if (!accepted) {
             toast("系統拒絕播放手勢");
+        }
+    }
+
+    private float scaled(float value, float scale, int targetSize) {
+        return Math.max(0f, Math.min(targetSize - 1f, value * scale));
+    }
+
+    private void cancelCurrentGesture() {
+        try {
+            Path cancelPath = new Path();
+            cancelPath.moveTo(0f, 0f);
+            cancelPath.lineTo(0f, 0f);
+            GestureDescription gesture = new GestureDescription.Builder()
+                    .addStroke(new GestureDescription.StrokeDescription(
+                            cancelPath,
+                            0L,
+                            1L
+                    ))
+                    .build();
+            dispatchGesture(gesture, null, null);
+        } catch (RuntimeException ignored) {
+            // The generation token still prevents another loop from starting.
         }
     }
 
