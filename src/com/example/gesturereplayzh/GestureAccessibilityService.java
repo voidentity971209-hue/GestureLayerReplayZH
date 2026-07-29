@@ -11,6 +11,7 @@ import android.graphics.PointF;
 import android.graphics.Rect;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.Log;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
@@ -25,6 +26,7 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public final class GestureAccessibilityService extends AccessibilityService {
+    private static final String LOG_TAG = "GestureReplayAuto";
     interface AutoGestureCallback {
         void onCompleted();
         void onCancelled();
@@ -179,6 +181,11 @@ public final class GestureAccessibilityService extends AccessibilityService {
             List<GestureLayer> layers,
             AutoGestureCallback callback
     ) {
+        Log.i(
+                LOG_TAG,
+                "playAutoGesture layers=" + layers.size() +
+                        " fingerprint=" + GestureIdentity.fingerprint(layers)
+        );
         playInternal(layers, false, callback);
     }
 
@@ -351,8 +358,17 @@ public final class GestureAccessibilityService extends AccessibilityService {
         GestureDescription.Builder builder = new GestureDescription.Builder();
         long totalDuration = 0L;
         Point targetScreen = ScreenDimensions.get(this);
+        Log.i(
+                LOG_TAG,
+                "dispatchLayers token=" + token +
+                        " layers=" + layers.size() +
+                        " target=" + targetScreen.x + "x" + targetScreen.y
+        );
+        int layerIndex = 0;
         for (GestureLayer layer : layers) {
+            layerIndex++;
             if (layer.points.size() < 2) {
+                Log.w(LOG_TAG, "layer=" + layerIndex + " skipped points=" + layer.points.size());
                 continue;
             }
             int sourceWidth = Math.max(1, layer.sourceWidth);
@@ -381,6 +397,14 @@ public final class GestureAccessibilityService extends AccessibilityService {
             }
             long duration = Math.max(100L, layer.durationMs);
             long start = Math.max(0L, layer.startDelayMs);
+            Log.i(
+                    LOG_TAG,
+                    "layer=" + layerIndex +
+                            " startMs=" + start +
+                            " durationMs=" + duration +
+                            " points=" + layer.points.size() +
+                            " source=" + sourceWidth + "x" + sourceHeight
+            );
             totalDuration = Math.max(totalDuration, start + duration);
             builder.addStroke(new GestureDescription.StrokeDescription(path, start, duration));
         }

@@ -7,12 +7,14 @@ import android.graphics.PointF;
 import android.hardware.HardwareBuffer;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.Log;
 import android.view.Display;
 
 import java.util.ArrayList;
 import java.util.List;
 
 final class AutoPilotController {
+    private static final String LOG_TAG = "GestureReplayAuto";
     private static final int MAP_FRAME_COUNT = 3;
     private static final long MAP_FRAME_GAP_MS = 40L;
     private static final long MIN_SCREENSHOT_INTERVAL_MS = 350L;
@@ -69,16 +71,26 @@ final class AutoPilotController {
         if (!isCurrent(token)) {
             return;
         }
-        handler.postDelayed(() -> inspectCurrentScreen(token, 0), delayMs);
+        handler.postDelayed(() -> inspectCurrentScreen(token, 0, 0), delayMs);
     }
 
-    private void inspectCurrentScreen(int token, int unknownCount) {
+    private void inspectCurrentScreen(
+            int token,
+            int unknownCount,
+            int closeCount
+    ) {
         if (!isCurrent(token)) {
             return;
         }
         takeScreenshot(token, bitmap -> {
             AutoScreenAnalyzer.ScreenState state =
                     AutoScreenAnalyzer.classifyAfterTap(bitmap, null);
+            Log.i(
+                    LOG_TAG,
+                    "current-screen state=" + state +
+                            " unknown=" + unknownCount +
+                            " closeConfirm=" + closeCount
+            );
             AutoSettings settings = AutoSettings.load(service);
             int width = bitmap.getWidth();
             int height = bitmap.getHeight();
@@ -92,6 +104,18 @@ final class AutoPilotController {
                     );
                     break;
                 case HAS_CLOSE_BUTTON:
+                    if (closeCount < 1) {
+                        recycle(bitmap);
+                        handler.postDelayed(
+                                () -> inspectCurrentScreen(
+                                        token,
+                                        0,
+                                        closeCount + 1
+                                ),
+                                OPEN_SCREEN_POLL_MS
+                        );
+                        break;
+                    }
                     recycle(bitmap);
                     service.autoStatus(settings.exitDescription);
                     service.dispatchAutoTap(
@@ -113,7 +137,8 @@ final class AutoPilotController {
                         handler.postDelayed(
                                 () -> inspectCurrentScreen(
                                         token,
-                                        unknownCount + 1
+                                        unknownCount + 1,
+                                        0
                                 ),
                                 OPEN_SCREEN_POLL_MS
                         );
@@ -182,7 +207,7 @@ final class AutoPilotController {
                 target.point.x,
                 target.point.y,
                 () -> handler.postDelayed(
-                        () -> inspectOpenedScreen(token, 0, 0, 0),
+                        () -> inspectOpenedScreen(token, 0, 0, 0, 0),
                         POST_TAP_CLASSIFY_DELAY_MS
                 )
         );
@@ -207,7 +232,8 @@ final class AutoPilotController {
             int token,
             int pollCount,
             int encounterCount,
-            int unknownCount
+            int unknownCount,
+            int closeCount
     ) {
         if (!isCurrent(token)) {
             return;
@@ -215,6 +241,14 @@ final class AutoPilotController {
         takeScreenshot(token, bitmap -> {
             AutoScreenAnalyzer.ScreenState state =
                     AutoScreenAnalyzer.classifyAfterTap(bitmap, mapBeforeTap);
+            Log.i(
+                    LOG_TAG,
+                    "opened-screen state=" + state +
+                            " poll=" + pollCount +
+                            " closeConfirm=" + closeCount +
+                            " target=" +
+                            (lastTarget == null ? "none" : lastTarget.type)
+            );
             AutoSettings settings = AutoSettings.load(service);
             switch (state) {
                 case ENCOUNTER:
@@ -233,6 +267,7 @@ final class AutoPilotController {
                                 token,
                                 pollCount,
                                 nextEncounterCount,
+                                0,
                                 0
                         );
                     }
@@ -245,6 +280,17 @@ final class AutoPilotController {
                     scheduleCycle(settings.scanIntervalMs, token);
                     break;
                 case HAS_CLOSE_BUTTON:
+                    if (closeCount < 1) {
+                        recycle(bitmap);
+                        pollOpenedScreen(
+                                token,
+                                pollCount,
+                                0,
+                                0,
+                                closeCount + 1
+                        );
+                        break;
+                    }
                     int width = bitmap.getWidth();
                     int height = bitmap.getHeight();
                     recycle(bitmap);
@@ -272,7 +318,8 @@ final class AutoPilotController {
                                 token,
                                 pollCount,
                                 0,
-                                nextUnknownCount
+                                nextUnknownCount,
+                                0
                         );
                     }
                     break;
@@ -284,7 +331,8 @@ final class AutoPilotController {
             int token,
             int pollCount,
             int encounterCount,
-            int unknownCount
+            int unknownCount,
+            int closeCount
     ) {
         if (pollCount + 1 >= MAX_OPEN_SCREEN_POLLS) {
             blockLastTarget();
@@ -296,7 +344,8 @@ final class AutoPilotController {
                         token,
                         pollCount + 1,
                         encounterCount,
-                        unknownCount
+                        unknownCount,
+                        closeCount
                 ),
                 OPEN_SCREEN_POLL_MS
         );
@@ -344,6 +393,12 @@ final class AutoPilotController {
             return;
         }
         handler.removeCallbacksAndMessages(null);
+        Log.i(
+                LOG_TAG,
+                "catch-dispatch source=current layers=" + catchLayers.size() +
+                        " fingerprint=" +
+                        GestureIdentity.fingerprint(catchLayers)
+        );
         recycleMapFrames();
         mapBeforeTap = null;
         lastTarget = null;

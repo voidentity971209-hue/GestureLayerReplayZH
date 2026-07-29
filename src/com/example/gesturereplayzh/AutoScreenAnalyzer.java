@@ -100,12 +100,12 @@ final class AutoScreenAnalyzer {
         if (looksLikeMapMenu(bitmap)) {
             return ScreenState.MAP_RETURNED;
         }
-        if (looksLikeCloseButton(bitmap)) {
-            return ScreenState.HAS_CLOSE_BUTTON;
-        }
         if (mapBeforeTap != null &&
                 mapBeforeTap.distance(new FrameSignature(bitmap)) < 0.105f) {
             return ScreenState.MAP_RETURNED;
+        }
+        if (looksLikeCloseButton(bitmap)) {
+            return ScreenState.HAS_CLOSE_BUTTON;
         }
         return ScreenState.ROCKET_DIALOG;
     }
@@ -613,10 +613,19 @@ final class AutoScreenAnalyzer {
     }
 
     private static boolean looksLikeMapMenu(Bitmap bitmap) {
-        RegionStats centerBottom =
+        RegionStats wholeBall =
                 stats(bitmap, 0.40f, 0.88f, 0.60f, 0.99f);
-        return centerBottom.redRatio > 0.080f &&
-                centerBottom.whiteRatio > 0.050f;
+        RegionStats redTop =
+                stats(bitmap, 0.41f, 0.88f, 0.59f, 0.945f);
+        RegionStats whiteBottom =
+                stats(bitmap, 0.41f, 0.925f, 0.59f, 0.995f);
+        return (
+                wholeBall.redRatio > 0.055f &&
+                        wholeBall.whiteRatio > 0.040f
+                ) || (
+                redTop.redRatio > 0.060f &&
+                        whiteBottom.whiteRatio > 0.045f
+                );
     }
 
     private static RegionStats stats(
