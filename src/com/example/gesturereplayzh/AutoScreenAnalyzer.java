@@ -19,7 +19,8 @@ final class AutoScreenAnalyzer {
         ENCOUNTER,
         HAS_CLOSE_BUTTON,
         MAP_RETURNED,
-        ROCKET_DIALOG
+        ROCKET_DIALOG,
+        UNKNOWN
     }
 
     enum TargetType {
@@ -97,17 +98,21 @@ final class AutoScreenAnalyzer {
         if (looksLikeEncounter(bitmap)) {
             return ScreenState.ENCOUNTER;
         }
-        if (looksLikeMapMenu(bitmap)) {
+        if (looksLikeMapScreen(bitmap)) {
             return ScreenState.MAP_RETURNED;
         }
         if (mapBeforeTap != null &&
-                mapBeforeTap.distance(new FrameSignature(bitmap)) < 0.105f) {
+                mapBeforeTap.distance(new FrameSignature(bitmap)) < 0.105f &&
+                looksLikeMapScreenRelaxed(bitmap)) {
             return ScreenState.MAP_RETURNED;
+        }
+        if (looksLikeRocketDialog(bitmap)) {
+            return ScreenState.ROCKET_DIALOG;
         }
         if (looksLikeCloseButton(bitmap)) {
             return ScreenState.HAS_CLOSE_BUTTON;
         }
-        return ScreenState.ROCKET_DIALOG;
+        return ScreenState.UNKNOWN;
     }
 
     static TargetCandidate findMapTarget(
@@ -595,16 +600,46 @@ final class AutoScreenAnalyzer {
 
     private static boolean looksLikeEncounter(Bitmap bitmap) {
         RegionStats ball = stats(bitmap, 0.27f, 0.79f, 0.73f, 0.995f);
-        RegionStats sideButtons = stats(bitmap, 0.03f, 0.82f, 0.97f, 0.97f);
-        return ball.redRatio > 0.105f &&
-                ball.whiteRatio > 0.10f &&
-                sideButtons.whiteRatio > 0.075f;
+        RegionStats leftButton =
+                stats(bitmap, 0.03f, 0.82f, 0.23f, 0.98f);
+        RegionStats rightButton =
+                stats(bitmap, 0.77f, 0.82f, 0.97f, 0.98f);
+        RegionStats upperControls =
+                stats(bitmap, 0.03f, 0.04f, 0.65f, 0.20f);
+
+        boolean colorNeutralBall =
+                ball.whiteRatio > 0.050f &&
+                        ball.edgeRatio > 0.070f &&
+                        (
+                                ball.redRatio > 0.050f ||
+                                        ball.blueRatio > 0.080f ||
+                                        ball.darkRatio > 0.080f ||
+                                        ball.yellowRatio > 0.025f ||
+                                        ball.edgeRatio > 0.145f
+                        );
+        boolean symmetricCaptureButtons =
+                leftButton.whiteRatio > 0.030f &&
+                        rightButton.whiteRatio > 0.030f &&
+                        leftButton.edgeRatio > 0.035f &&
+                        rightButton.edgeRatio > 0.035f;
+        boolean captureUpperControls =
+                upperControls.whiteRatio > 0.003f &&
+                        upperControls.edgeRatio > 0.045f;
+
+        return !looksLikeMapScreen(bitmap) &&
+                colorNeutralBall &&
+                symmetricCaptureButtons &&
+                captureUpperControls;
     }
 
     private static boolean looksLikeCloseButton(Bitmap bitmap) {
         RegionStats centerBottom =
                 stats(bitmap, 0.43f, 0.885f, 0.57f, 0.995f);
-        return centerBottom.redRatio < 0.10f &&
+        if (looksPossiblyLikeEncounter(bitmap)) {
+            return false;
+        }
+        return centerBottom.edgeRatio > 0.105f &&
+                centerBottom.redRatio < 0.10f &&
                 (
                         centerBottom.whiteRatio > 0.025f &&
                                 centerBottom.blueRatio > 0.022f ||
@@ -612,7 +647,31 @@ final class AutoScreenAnalyzer {
                 );
     }
 
-    private static boolean looksLikeMapMenu(Bitmap bitmap) {
+    private static boolean looksLikeMapScreen(Bitmap bitmap) {
+        if (!looksLikeMapMenuBall(bitmap)) {
+            return false;
+        }
+        RegionStats avatar =
+                stats(bitmap, 0.00f, 0.76f, 0.31f, 0.995f);
+        RegionStats rightActions =
+                stats(bitmap, 0.72f, 0.70f, 0.995f, 0.97f);
+        return looksLikeAvatarAnchor(avatar) &&
+                looksLikeRightMapAnchor(rightActions);
+    }
+
+    private static boolean looksLikeMapScreenRelaxed(Bitmap bitmap) {
+        RegionStats avatar =
+                stats(bitmap, 0.00f, 0.76f, 0.31f, 0.995f);
+        RegionStats rightActions =
+                stats(bitmap, 0.72f, 0.70f, 0.995f, 0.97f);
+        boolean avatarAnchor = looksLikeAvatarAnchor(avatar);
+        boolean rightAnchor = looksLikeRightMapAnchor(rightActions);
+        return looksLikeMapMenuBall(bitmap)
+                ? avatarAnchor || rightAnchor
+                : avatarAnchor && rightAnchor;
+    }
+
+    private static boolean looksLikeMapMenuBall(Bitmap bitmap) {
         RegionStats wholeBall =
                 stats(bitmap, 0.40f, 0.88f, 0.60f, 0.99f);
         RegionStats redTop =
@@ -626,6 +685,44 @@ final class AutoScreenAnalyzer {
                 redTop.redRatio > 0.060f &&
                         whiteBottom.whiteRatio > 0.045f
                 );
+    }
+
+    private static boolean looksLikeAvatarAnchor(RegionStats avatar) {
+        return avatar.edgeRatio > 0.140f &&
+                (
+                        avatar.redRatio +
+                                avatar.blueRatio +
+                                avatar.whiteRatio +
+                                avatar.darkRatio
+                ) > 0.075f;
+    }
+
+    private static boolean looksLikeRightMapAnchor(RegionStats rightActions) {
+        return rightActions.edgeRatio > 0.110f &&
+                rightActions.whiteRatio > 0.070f;
+    }
+
+    private static boolean looksPossiblyLikeEncounter(Bitmap bitmap) {
+        RegionStats ball = stats(bitmap, 0.27f, 0.79f, 0.73f, 0.995f);
+        RegionStats leftButton =
+                stats(bitmap, 0.03f, 0.82f, 0.23f, 0.98f);
+        RegionStats rightButton =
+                stats(bitmap, 0.77f, 0.82f, 0.97f, 0.98f);
+        return ball.whiteRatio > 0.035f &&
+                ball.edgeRatio > 0.055f &&
+                leftButton.whiteRatio > 0.020f &&
+                rightButton.whiteRatio > 0.020f;
+    }
+
+    private static boolean looksLikeRocketDialog(Bitmap bitmap) {
+        RegionStats character =
+                stats(bitmap, 0.18f, 0.18f, 0.82f, 0.72f);
+        RegionStats lowerPanel =
+                stats(bitmap, 0.03f, 0.70f, 0.97f, 0.95f);
+        return character.darkRatio > 0.20f &&
+                character.redRatio > 0.015f &&
+                character.edgeRatio > 0.065f &&
+                lowerPanel.darkRatio > 0.35f;
     }
 
     private static RegionStats stats(
@@ -645,6 +742,9 @@ final class AutoScreenAnalyzer {
         int white = 0;
         int blue = 0;
         int green = 0;
+        int dark = 0;
+        int yellow = 0;
+        int edge = 0;
         for (int y = startY; y < endY; y += step) {
             for (int x = startX; x < endX; x += step) {
                 int color = bitmap.getPixel(x, y);
@@ -666,9 +766,28 @@ final class AutoScreenAnalyzer {
                 if (g > 145 && g > r * 1.10f && g > b * 1.05f) {
                     green++;
                 }
+                if (max < 92) {
+                    dark++;
+                }
+                if (r > 140 && g > 120 && b < 110 &&
+                        r > b * 1.50f && g > b * 1.30f) {
+                    yellow++;
+                }
+                if (edgeStrength(bitmap, x, y, step) > 42) {
+                    edge++;
+                }
             }
         }
-        return new RegionStats(total, red, white, blue, green);
+        return new RegionStats(
+                total,
+                red,
+                white,
+                blue,
+                green,
+                dark,
+                yellow,
+                edge
+        );
     }
 
     private static boolean isBlocked(
@@ -826,13 +945,28 @@ final class AutoScreenAnalyzer {
         final float whiteRatio;
         final float blueRatio;
         final float greenRatio;
+        final float darkRatio;
+        final float yellowRatio;
+        final float edgeRatio;
 
-        RegionStats(int total, int red, int white, int blue, int green) {
+        RegionStats(
+                int total,
+                int red,
+                int white,
+                int blue,
+                int green,
+                int dark,
+                int yellow,
+                int edge
+        ) {
             int safeTotal = Math.max(1, total);
             redRatio = red / (float) safeTotal;
             whiteRatio = white / (float) safeTotal;
             blueRatio = blue / (float) safeTotal;
             greenRatio = green / (float) safeTotal;
+            darkRatio = dark / (float) safeTotal;
+            yellowRatio = yellow / (float) safeTotal;
+            edgeRatio = edge / (float) safeTotal;
         }
     }
 }

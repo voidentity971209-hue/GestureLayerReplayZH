@@ -22,13 +22,13 @@ final class AutoPilotController {
     private static final long OPEN_SCREEN_POLL_MS = 250L;
     private static final int MAX_OPEN_SCREEN_POLLS = 6;
     private static final int REQUIRED_ENCOUNTER_POLLS = 1;
-    private static final int REQUIRED_UNKNOWN_POLLS = 4;
     private static final int MAX_CATCH_RETRIES = 2;
     private static final long CATCH_RETRY_DELAY_MS = 900L;
+    private static final long NON_ENCOUNTER_COOLDOWN_MS = 60_000L;
 
     private final GestureAccessibilityService service;
     private final Handler handler = new Handler(Looper.getMainLooper());
-    private final List<PointF> blockedPoints = new ArrayList<>();
+    private final List<BlockedTarget> blockedTargets = new ArrayList<>();
     private final List<Bitmap> mapFrames = new ArrayList<>();
 
     private boolean active;
@@ -51,7 +51,7 @@ final class AutoPilotController {
         stop();
         active = true;
         generation++;
-        blockedPoints.clear();
+        blockedTargets.clear();
         service.autoStatus("自動辨識已啟動：請保持最大視野、最高角度");
         scheduleCycle(500L, generation);
     }
@@ -128,11 +128,18 @@ final class AutoPilotController {
                     beginMapScan(bitmap, token);
                     break;
                 case ROCKET_DIALOG:
+                    recycle(bitmap);
+                    service.autoStatus(settings.rocketDescription);
+                    runRocketTap(token, 0);
+                    break;
+                case UNKNOWN:
                 default:
                     recycle(bitmap);
                     if (unknownCount >= 8) {
-                        service.autoStatus(settings.rocketDescription);
-                        runRocketTap(token, 0);
+                        service.autoStatus(
+                                "畫面尚未確認，不執行點擊，稍後重新判斷"
+                        );
+                        scheduleCycle(settings.scanIntervalMs, token);
                     } else {
                         handler.postDelayed(
                                 () -> inspectCurrentScreen(
@@ -183,7 +190,10 @@ final class AutoPilotController {
             return;
         }
         AutoScreenAnalyzer.TargetCandidate target =
-                AutoScreenAnalyzer.findMapTarget(mapFrames, blockedPoints);
+                AutoScreenAnalyzer.findMapTarget(
+                        mapFrames,
+                        activeBlockedPoints()
+                );
         Bitmap lastFrame = mapFrames.get(mapFrames.size() - 1);
         if (target == null) {
             recycleMapFrames();
@@ -276,7 +286,9 @@ final class AutoPilotController {
                     recycle(bitmap);
                     mapBeforeTap = null;
                     blockLastTarget();
-                    service.autoStatus("已返回地圖，繼續掃描");
+                    service.autoStatus(
+                            "未進入捕捉畫面，該區域暫停 1 分鐘並繼續掃描"
+                    );
                     scheduleCycle(settings.scanIntervalMs, token);
                     break;
                 case HAS_CLOSE_BUTTON:
@@ -304,15 +316,23 @@ final class AutoPilotController {
                     );
                     break;
                 case ROCKET_DIALOG:
+                    recycle(bitmap);
+                    mapBeforeTap = null;
+                    blockLastTarget();
+                    service.autoStatus(settings.rocketDescription);
+                    runRocketTap(token, 0);
+                    break;
+                case UNKNOWN:
                 default:
                     recycle(bitmap);
                     int nextUnknownCount = unknownCount + 1;
-                    if (nextUnknownCount >= REQUIRED_UNKNOWN_POLLS ||
-                            pollCount + 1 >= MAX_OPEN_SCREEN_POLLS) {
+                    if (pollCount + 1 >= MAX_OPEN_SCREEN_POLLS) {
                         mapBeforeTap = null;
                         blockLastTarget();
-                        service.autoStatus(settings.rocketDescription);
-                        runRocketTap(token, 0);
+                        service.autoStatus(
+                                "點擊後未確認畫面，該區域暫停 1 分鐘"
+                        );
+                        scheduleCycle(settings.scanIntervalMs, token);
                     } else {
                         pollOpenedScreen(
                                 token,
@@ -481,11 +501,31 @@ final class AutoPilotController {
         if (lastTarget == null) {
             return;
         }
-        blockedPoints.add(new PointF(lastTarget.point.x, lastTarget.point.y));
-        if (blockedPoints.size() > 20) {
-            blockedPoints.remove(0);
+        blockedTargets.add(
+                new BlockedTarget(
+                        new PointF(lastTarget.point.x, lastTarget.point.y),
+                        System.currentTimeMillis() +
+                                NON_ENCOUNTER_COOLDOWN_MS
+                )
+        );
+        if (blockedTargets.size() > 40) {
+            blockedTargets.remove(0);
         }
         lastTarget = null;
+    }
+
+    private List<PointF> activeBlockedPoints() {
+        long now = System.currentTimeMillis();
+        List<PointF> result = new ArrayList<>();
+        for (int i = blockedTargets.size() - 1; i >= 0; i--) {
+            BlockedTarget target = blockedTargets.get(i);
+            if (target.expiresAt <= now) {
+                blockedTargets.remove(i);
+            } else {
+                result.add(target.point);
+            }
+        }
+        return result;
     }
 
     private PointF screenSize() {
@@ -606,5 +646,15 @@ final class AutoPilotController {
 
     private interface BitmapReceiver {
         void receive(Bitmap bitmap);
+    }
+
+    private static final class BlockedTarget {
+        final PointF point;
+        final long expiresAt;
+
+        BlockedTarget(PointF point, long expiresAt) {
+            this.point = point;
+            this.expiresAt = expiresAt;
+        }
     }
 }
