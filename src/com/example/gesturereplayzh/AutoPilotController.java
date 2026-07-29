@@ -430,6 +430,22 @@ final class AutoPilotController {
                             scheduleCycle(1200L, token);
                             return;
                         }
+                        PointF drivingButton =
+                                AutoScreenAnalyzer
+                                        .findDrivingConfirmationButton(bitmap);
+                        if (drivingButton != null) {
+                            recycle(bitmap);
+                            service.autoStatus(
+                                    "發現移動速度警告，按下「我不是駕駛」"
+                            );
+                            service.dispatchAutoTap(
+                                    drivingButton.x,
+                                    drivingButton.y,
+                                    AutoPilotController.this
+                                            ::onDrivingPromptConfirmed
+                            );
+                            return;
+                        }
                         receiver.receive(bitmap);
                     }
 

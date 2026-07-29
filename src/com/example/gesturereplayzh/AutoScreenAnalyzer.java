@@ -75,6 +75,20 @@ final class AutoScreenAnalyzer {
         return new FrameSignature(bitmap);
     }
 
+    static PointF findDrivingConfirmationButton(Bitmap bitmap) {
+        RegionStats modal = stats(bitmap, 0.04f, 0.27f, 0.96f, 0.73f);
+        RegionStats button = stats(bitmap, 0.14f, 0.63f, 0.86f, 0.69f);
+        if (modal.whiteRatio > 0.55f &&
+                button.greenRatio > 0.55f &&
+                button.redRatio < 0.08f) {
+            return new PointF(
+                    bitmap.getWidth() * 0.50f,
+                    bitmap.getHeight() * 0.66f
+            );
+        }
+        return null;
+    }
+
     static ScreenState classifyAfterTap(
             Bitmap bitmap,
             FrameSignature mapBeforeTap
@@ -609,6 +623,7 @@ final class AutoScreenAnalyzer {
         int red = 0;
         int white = 0;
         int blue = 0;
+        int green = 0;
         for (int y = startY; y < endY; y += step) {
             for (int x = startX; x < endX; x += step) {
                 int color = bitmap.getPixel(x, y);
@@ -627,9 +642,12 @@ final class AutoScreenAnalyzer {
                 if (b > 120 && b > r * 1.08f && b >= g * 0.82f) {
                     blue++;
                 }
+                if (g > 145 && g > r * 1.10f && g > b * 1.05f) {
+                    green++;
+                }
             }
         }
-        return new RegionStats(total, red, white, blue);
+        return new RegionStats(total, red, white, blue, green);
     }
 
     private static boolean isBlocked(
@@ -783,12 +801,14 @@ final class AutoScreenAnalyzer {
         final float redRatio;
         final float whiteRatio;
         final float blueRatio;
+        final float greenRatio;
 
-        RegionStats(int total, int red, int white, int blue) {
+        RegionStats(int total, int red, int white, int blue, int green) {
             int safeTotal = Math.max(1, total);
             redRatio = red / (float) safeTotal;
             whiteRatio = white / (float) safeTotal;
             blueRatio = blue / (float) safeTotal;
+            greenRatio = green / (float) safeTotal;
         }
     }
 }
