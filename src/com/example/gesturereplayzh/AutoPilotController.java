@@ -13,14 +13,22 @@ import java.util.ArrayList;
 import java.util.List;
 
 final class AutoPilotController {
+    private static final int MAP_FRAME_COUNT = 3;
+    private static final long MAP_FRAME_GAP_MS = 450L;
+    private static final long OPEN_SCREEN_POLL_MS = 400L;
+    private static final int MAX_OPEN_SCREEN_POLLS = 9;
+    private static final int REQUIRED_ENCOUNTER_POLLS = 2;
+    private static final int REQUIRED_UNKNOWN_POLLS = 9;
+
     private final GestureAccessibilityService service;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final List<PointF> blockedPoints = new ArrayList<>();
+    private final List<Bitmap> mapFrames = new ArrayList<>();
 
     private boolean active;
     private boolean screenshotPending;
+    private int screenshotFailures;
     private int generation;
-    private Bitmap firstMapFrame;
     private AutoScreenAnalyzer.FrameSignature mapBeforeTap;
     private AutoScreenAnalyzer.TargetCandidate lastTarget;
 
@@ -45,107 +53,124 @@ final class AutoPilotController {
         active = false;
         generation++;
         screenshotPending = false;
+        screenshotFailures = 0;
         handler.removeCallbacksAndMessages(null);
-        recycle(firstMapFrame);
-        firstMapFrame = null;
+        recycleMapFrames();
         mapBeforeTap = null;
         lastTarget = null;
     }
 
     private void scheduleScan(long delayMs, int token) {
-        handler.postDelayed(() -> captureFirstMapFrame(token), delayMs);
+        if (!isCurrent(token)) {
+            return;
+        }
+        handler.postDelayed(() -> {
+            recycleMapFrames();
+            captureMapFrame(token);
+        }, delayMs);
     }
 
-    private void captureFirstMapFrame(int token) {
+    private void captureMapFrame(int token) {
         if (!isCurrent(token)) {
             return;
         }
         takeScreenshot(token, bitmap -> {
-            recycle(firstMapFrame);
-            firstMapFrame = bitmap;
-            AutoSettings settings = AutoSettings.load(service);
-            handler.postDelayed(
-                    () -> captureSecondMapFrame(token),
-                    settings.scanIntervalMs
-            );
-        });
-    }
-
-    private void captureSecondMapFrame(int token) {
-        if (!isCurrent(token) || firstMapFrame == null) {
-            return;
-        }
-        takeScreenshot(token, secondFrame -> {
-            AutoScreenAnalyzer.TargetCandidate target =
-                    AutoScreenAnalyzer.findMapTarget(
-                            firstMapFrame,
-                            secondFrame,
-                            blockedPoints
-                    );
-            recycle(firstMapFrame);
-            firstMapFrame = null;
-            if (target == null) {
-                recycle(secondFrame);
-                scheduleScan(
-                        AutoSettings.load(service).scanIntervalMs,
-                        token
+            mapFrames.add(bitmap);
+            if (mapFrames.size() < MAP_FRAME_COUNT) {
+                handler.postDelayed(
+                        () -> captureMapFrame(token),
+                        MAP_FRAME_GAP_MS
                 );
                 return;
             }
-
-            lastTarget = target;
-            mapBeforeTap = AutoScreenAnalyzer.signature(secondFrame);
-            recycle(secondFrame);
-            String targetName = target.type ==
-                    AutoScreenAnalyzer.TargetType.POKEMON
-                    ? "寶可夢候選"
-                    : "藍色補給站候選";
-            service.autoStatus(
-                    targetName + "：" +
-                            Math.round(target.point.x) + "," +
-                            Math.round(target.point.y)
-            );
-            service.dispatchAutoTap(
-                    target.point.x,
-                    target.point.y,
-                    () -> {
-                        AutoSettings settings = AutoSettings.load(service);
-                        handler.postDelayed(
-                                () -> inspectOpenedScreen(token),
-                                settings.afterTargetTapMs
-                        );
-                    }
-            );
+            analyzeMapFrames(token);
         });
     }
 
-    private void inspectOpenedScreen(int token) {
+    private void analyzeMapFrames(int token) {
+        if (!isCurrent(token) || mapFrames.size() < MAP_FRAME_COUNT) {
+            return;
+        }
+        AutoScreenAnalyzer.TargetCandidate target =
+                AutoScreenAnalyzer.findMapTarget(mapFrames, blockedPoints);
+        Bitmap lastFrame = mapFrames.get(mapFrames.size() - 1);
+        if (target == null) {
+            recycleMapFrames();
+            scheduleScan(AutoSettings.load(service).scanIntervalMs, token);
+            return;
+        }
+
+        lastTarget = target;
+        mapBeforeTap = AutoScreenAnalyzer.signature(lastFrame);
+        recycleMapFrames();
+        String targetName =
+                target.type == AutoScreenAnalyzer.TargetType.POKEMON
+                        ? "寶可夢候選"
+                        : "藍色補給站候選";
+        service.autoStatus(
+                targetName + "：" +
+                        Math.round(target.point.x) + "," +
+                        Math.round(target.point.y)
+        );
+        service.dispatchAutoTap(
+                target.point.x,
+                target.point.y,
+                () -> {
+                    AutoSettings settings = AutoSettings.load(service);
+                    handler.postDelayed(
+                            () -> inspectOpenedScreen(token, 0, 0, 0),
+                            settings.afterTargetTapMs
+                    );
+                }
+        );
+    }
+
+    private void inspectOpenedScreen(
+            int token,
+            int pollCount,
+            int encounterCount,
+            int unknownCount
+    ) {
         if (!isCurrent(token)) {
             return;
         }
         takeScreenshot(token, bitmap -> {
             AutoScreenAnalyzer.ScreenState state =
                     AutoScreenAnalyzer.classifyAfterTap(bitmap, mapBeforeTap);
-            mapBeforeTap = null;
             AutoSettings settings = AutoSettings.load(service);
             switch (state) {
                 case ENCOUNTER:
                     recycle(bitmap);
-                    service.autoStatus(settings.encounterDescription);
-                    handler.postDelayed(
-                            () -> playCatchGesture(token),
-                            settings.beforeCatchMs
-                    );
+                    int nextEncounterCount = encounterCount + 1;
+                    if (nextEncounterCount >= REQUIRED_ENCOUNTER_POLLS) {
+                        mapBeforeTap = null;
+                        lastTarget = null;
+                        service.autoStatus(settings.encounterDescription);
+                        handler.postDelayed(
+                                () -> playCatchGesture(token, 0),
+                                settings.beforeCatchMs
+                        );
+                    } else {
+                        pollOpenedScreen(
+                                token,
+                                pollCount,
+                                nextEncounterCount,
+                                0
+                        );
+                    }
                     break;
                 case MAP_RETURNED:
                     recycle(bitmap);
-                    service.autoStatus("已自動返回地圖");
+                    mapBeforeTap = null;
+                    blockLastTarget();
+                    service.autoStatus("已返回地圖，繼續掃描");
                     scheduleScan(settings.scanIntervalMs, token);
                     break;
                 case HAS_CLOSE_BUTTON:
                     int width = bitmap.getWidth();
                     int height = bitmap.getHeight();
                     recycle(bitmap);
+                    mapBeforeTap = null;
                     blockLastTarget();
                     service.autoStatus(settings.exitDescription);
                     service.dispatchAutoTap(
@@ -157,12 +182,46 @@ final class AutoPilotController {
                 case ROCKET_DIALOG:
                 default:
                     recycle(bitmap);
-                    blockLastTarget();
-                    service.autoStatus(settings.rocketDescription);
-                    runRocketTap(token, 0);
+                    int nextUnknownCount = unknownCount + 1;
+                    if (nextUnknownCount >= REQUIRED_UNKNOWN_POLLS ||
+                            pollCount + 1 >= MAX_OPEN_SCREEN_POLLS) {
+                        mapBeforeTap = null;
+                        blockLastTarget();
+                        service.autoStatus(settings.rocketDescription);
+                        runRocketTap(token, 0);
+                    } else {
+                        pollOpenedScreen(
+                                token,
+                                pollCount,
+                                0,
+                                nextUnknownCount
+                        );
+                    }
                     break;
             }
         });
+    }
+
+    private void pollOpenedScreen(
+            int token,
+            int pollCount,
+            int encounterCount,
+            int unknownCount
+    ) {
+        if (pollCount + 1 >= MAX_OPEN_SCREEN_POLLS) {
+            blockLastTarget();
+            scheduleScan(AutoSettings.load(service).scanIntervalMs, token);
+            return;
+        }
+        handler.postDelayed(
+                () -> inspectOpenedScreen(
+                        token,
+                        pollCount + 1,
+                        encounterCount,
+                        unknownCount
+                ),
+                OPEN_SCREEN_POLL_MS
+        );
     }
 
     private void runRocketTap(int token, int completedTaps) {
@@ -170,8 +229,8 @@ final class AutoPilotController {
             return;
         }
         AutoSettings settings = AutoSettings.load(service);
+        PointF screen = screenSize();
         if (completedTaps >= settings.rocketTapCount) {
-            PointF screen = screenSize();
             service.dispatchAutoTap(
                     screen.x * settings.exitXRatio,
                     screen.y * settings.exitYRatio,
@@ -179,7 +238,6 @@ final class AutoPilotController {
             );
             return;
         }
-        PointF screen = screenSize();
         service.dispatchAutoTap(
                 screen.x * settings.rocketTapXRatio,
                 screen.y * settings.rocketTapYRatio,
@@ -190,7 +248,7 @@ final class AutoPilotController {
         );
     }
 
-    private void playCatchGesture(int token) {
+    private void playCatchGesture(int token, int retryCount) {
         if (!isCurrent(token)) {
             return;
         }
@@ -200,11 +258,45 @@ final class AutoPilotController {
             stop();
             return;
         }
-        service.playAutoGesture(catchLayers);
-        AutoSettings settings = AutoSettings.load(service);
-        handler.postDelayed(
-                () -> scheduleScan(settings.scanIntervalMs, token),
-                settings.afterCatchMs
+        service.playAutoGesture(
+                catchLayers,
+                new GestureAccessibilityService.AutoGestureCallback() {
+                    @Override
+                    public void onCompleted() {
+                        if (!isCurrent(token)) {
+                            return;
+                        }
+                        service.autoStatus("捕捉手勢已完成");
+                        AutoSettings settings = AutoSettings.load(service);
+                        handler.postDelayed(
+                                () -> scheduleScan(
+                                        settings.scanIntervalMs,
+                                        token
+                                ),
+                                settings.afterCatchMs
+                        );
+                    }
+
+                    @Override
+                    public void onCancelled() {
+                        if (!isCurrent(token)) {
+                            return;
+                        }
+                        if (retryCount < 1) {
+                            service.autoStatus("捕捉手勢被取消，0.3 秒後重試");
+                            handler.postDelayed(
+                                    () -> playCatchGesture(token, retryCount + 1),
+                                    300L
+                            );
+                        } else {
+                            service.autoStatus("捕捉手勢再次取消，繼續掃描");
+                            scheduleScan(
+                                    AutoSettings.load(service).scanIntervalMs,
+                                    token
+                            );
+                        }
+                    }
+                }
         );
     }
 
@@ -225,7 +317,14 @@ final class AutoPilotController {
     }
 
     private void takeScreenshot(int token, BitmapReceiver receiver) {
-        if (!isCurrent(token) || screenshotPending) {
+        if (!isCurrent(token)) {
+            return;
+        }
+        if (screenshotPending) {
+            handler.postDelayed(
+                    () -> takeScreenshot(token, receiver),
+                    120L
+            );
             return;
         }
         screenshotPending = true;
@@ -238,11 +337,12 @@ final class AutoPilotController {
                             AccessibilityService.ScreenshotResult result
                     ) {
                         screenshotPending = false;
+                        screenshotFailures = 0;
+                        HardwareBuffer buffer = result.getHardwareBuffer();
                         if (!isCurrent(token)) {
-                            result.getHardwareBuffer().close();
+                            buffer.close();
                             return;
                         }
-                        HardwareBuffer buffer = result.getHardwareBuffer();
                         ColorSpace colorSpace = result.getColorSpace();
                         Bitmap hardwareBitmap =
                                 Bitmap.wrapHardwareBuffer(buffer, colorSpace);
@@ -269,11 +369,27 @@ final class AutoPilotController {
                         screenshotPending = false;
                         if (isCurrent(token)) {
                             service.autoStatus("畫面擷取失敗：" + errorCode);
-                            scheduleScan(1400L, token);
+                            screenshotFailures++;
+                            if (screenshotFailures <= 3) {
+                                handler.postDelayed(
+                                        () -> takeScreenshot(token, receiver),
+                                        600L
+                                );
+                            } else {
+                                screenshotFailures = 0;
+                                scheduleScan(1400L, token);
+                            }
                         }
                     }
                 }
         );
+    }
+
+    private void recycleMapFrames() {
+        for (Bitmap bitmap : mapFrames) {
+            recycle(bitmap);
+        }
+        mapFrames.clear();
     }
 
     private boolean isCurrent(int token) {

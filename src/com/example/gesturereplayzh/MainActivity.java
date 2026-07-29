@@ -114,7 +114,8 @@ public final class MainActivity extends Activity {
 
             TextView catchGestureInfo = text(
                     "預設捕捉手勢：原地速量留刪除前 4 條後的剩餘 5 條軌跡；" +
-                            "保留原本起點與長度，並與一般手勢版本分開保存。",
+                            "起點自動換算為 0.0、0.2、1.2、1.4、1.6 秒，" +
+                            "並與一般手勢版本分開保存。",
                     14f,
                     0xFF455A64
             );

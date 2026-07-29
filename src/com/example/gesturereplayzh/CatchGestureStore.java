@@ -15,6 +15,8 @@ import java.util.List;
 final class CatchGestureStore {
     private static final String PREFS = "auto_catch_gesture";
     private static final String KEY_LAYERS = "layers";
+    private static final String KEY_SCHEMA = "schema";
+    private static final int CURRENT_SCHEMA = 2;
     private static final int FIRST_CATCH_LAYER_INDEX = 4;
 
     private CatchGestureStore() {}
@@ -22,7 +24,8 @@ final class CatchGestureStore {
     static void ensureInstalled(Context context) {
         SharedPreferences preferences =
                 context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        if (preferences.contains(KEY_LAYERS)) {
+        if (preferences.contains(KEY_LAYERS) &&
+                preferences.getInt(KEY_SCHEMA, 1) >= CURRENT_SCHEMA) {
             return;
         }
         List<GestureLayer> layers = loadBuiltInRemainingLayers(context);
@@ -60,6 +63,7 @@ final class CatchGestureStore {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                 .edit()
                 .putString(KEY_LAYERS, array.toString())
+                .putInt(KEY_SCHEMA, CURRENT_SCHEMA)
                 .apply();
     }
 
@@ -91,9 +95,26 @@ final class CatchGestureStore {
                     result.add(layer);
                 }
             }
+            normalizeStartTimes(result);
         } catch (Exception ignored) {
             result.clear();
         }
         return result;
+    }
+
+    private static void normalizeStartTimes(List<GestureLayer> layers) {
+        if (layers.isEmpty()) {
+            return;
+        }
+        long earliest = Long.MAX_VALUE;
+        for (GestureLayer layer : layers) {
+            earliest = Math.min(earliest, layer.startDelayMs);
+        }
+        if (earliest <= 0L || earliest == Long.MAX_VALUE) {
+            return;
+        }
+        for (GestureLayer layer : layers) {
+            layer.startDelayMs = Math.max(0L, layer.startDelayMs - earliest);
+        }
     }
 }

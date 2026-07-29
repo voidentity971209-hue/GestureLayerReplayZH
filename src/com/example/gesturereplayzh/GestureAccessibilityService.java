@@ -23,6 +23,11 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public final class GestureAccessibilityService extends AccessibilityService {
+    interface AutoGestureCallback {
+        void onCompleted();
+        void onCancelled();
+    }
+
     private static volatile GestureAccessibilityService instance;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -98,17 +103,24 @@ public final class GestureAccessibilityService extends AccessibilityService {
         if (autoPilotController != null) {
             autoPilotController.stop();
         }
-        playInternal(layers, loop);
+        playInternal(layers, loop, null);
     }
 
-    void playAutoGesture(List<GestureLayer> layers) {
-        playInternal(layers, false);
+    void playAutoGesture(
+            List<GestureLayer> layers,
+            AutoGestureCallback callback
+    ) {
+        playInternal(layers, false, callback);
     }
 
-    private void playInternal(List<GestureLayer> layers, boolean loop) {
+    private void playInternal(
+            List<GestureLayer> layers,
+            boolean loop,
+            AutoGestureCallback callback
+    ) {
         final int token = generation.incrementAndGet();
         handler.removeCallbacksAndMessages(null);
-        dispatchLayers(layers, loop, token);
+        dispatchLayers(layers, loop, token, callback);
     }
 
     void showFloatingControls() {
@@ -246,16 +258,24 @@ public final class GestureAccessibilityService extends AccessibilityService {
         return Math.round(value * getResources().getDisplayMetrics().density);
     }
 
-    private void dispatchLayers(List<GestureLayer> layers, boolean loop, int token) {
+    private void dispatchLayers(
+            List<GestureLayer> layers,
+            boolean loop,
+            int token,
+            AutoGestureCallback callback
+    ) {
         if (token != generation.get()) {
+            notifyCancelled(callback);
             return;
         }
         if (layers.isEmpty()) {
             toast("尚未錄製軌跡");
+            notifyCancelled(callback);
             return;
         }
         if (layers.size() > GestureDescription.getMaxStrokeCount()) {
             toast("軌跡數量超過此手機限制：" + GestureDescription.getMaxStrokeCount());
+            notifyCancelled(callback);
             return;
         }
 
@@ -272,6 +292,7 @@ public final class GestureAccessibilityService extends AccessibilityService {
             boolean targetLandscape = targetScreen.x > targetScreen.y;
             if (sourceLandscape != targetLandscape) {
                 toast("錄製與播放的畫面方向不同，請先旋轉手機");
+                notifyCancelled(callback);
                 return;
             }
             float scaleX = targetScreen.x / (float) sourceWidth;
@@ -298,6 +319,7 @@ public final class GestureAccessibilityService extends AccessibilityService {
         if (totalDuration > GestureDescription.getMaxGestureDuration()) {
             toast("腳本長度超過此手機限制：" +
                     (GestureDescription.getMaxGestureDuration() / 1000f) + " 秒");
+            notifyCancelled(callback);
             return;
         }
 
@@ -308,10 +330,18 @@ public final class GestureAccessibilityService extends AccessibilityService {
                     public void onCompleted(GestureDescription gestureDescription) {
                         if (token == generation.get()) {
                             gestureInFlight = false;
+                            if (callback != null) {
+                                callback.onCompleted();
+                            }
                         }
                         if (loop && token == generation.get()) {
                             handler.postDelayed(
-                                    () -> dispatchLayers(layers, true, token),
+                                    () -> dispatchLayers(
+                                            layers,
+                                            true,
+                                            token,
+                                            callback
+                                    ),
                                     GestureStore.getLoopInterval(GestureAccessibilityService.this)
                             );
                         }
@@ -321,6 +351,7 @@ public final class GestureAccessibilityService extends AccessibilityService {
                     public void onCancelled(GestureDescription gestureDescription) {
                         if (token == generation.get()) {
                             gestureInFlight = false;
+                            notifyCancelled(callback);
                         }
                         if (token == generation.get()) {
                             toast("手勢被系統或手動觸控取消");
@@ -332,6 +363,13 @@ public final class GestureAccessibilityService extends AccessibilityService {
         gestureInFlight = accepted;
         if (!accepted) {
             toast("系統拒絕播放手勢");
+            notifyCancelled(callback);
+        }
+    }
+
+    private void notifyCancelled(AutoGestureCallback callback) {
+        if (callback != null) {
+            callback.onCancelled();
         }
     }
 
