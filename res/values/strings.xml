@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">分層手勢重播</string>
+    <string name="accessibility_label">分層手勢重播服務</string>
+    <string name="accessibility_description">在其他應用程式上顯示懸浮控制器，錄製並播放您親自建立的滑動軌跡。服務不讀取畫面內容。</string>
+</resources>

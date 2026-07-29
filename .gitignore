@@ -1,0 +1,15 @@
+# Android/IDE generated files
+.gradle/
+.idea/
+build/
+local.properties
+
+# Release artifacts are uploaded separately
+release/
+*.apk
+*.idsig
+
+# Never publish signing material
+*.keystore
+*.jks
+
