@@ -8,9 +8,11 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.provider.Settings;
+import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -43,6 +45,9 @@ public final class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         BuiltInGestureStore.ensureInstalled(this);
+        if (isExperimentalBuild()) {
+            CatchGestureStore.ensureInstalled(this);
+        }
         buildUi();
     }
 
@@ -78,6 +83,60 @@ public final class MainActivity extends Activity {
         serviceStatus.setPadding(dp(12), dp(10), dp(12), dp(10));
         serviceStatus.setBackgroundColor(0xFFE8EAF6);
         root.addView(serviceStatus);
+
+        if (isExperimentalBuild()) {
+            TextView autoWarning = text(
+                    "全自動辨識實驗版\n" +
+                            "開始前請把遊戲地圖調成最大視野、最高角度，" +
+                            "並隱藏 PGSharp 功能按鈕。畫面判斷規則固定，" +
+                            "操作名稱、描述、時間、次數與點擊位置可自行修改。",
+                    15f,
+                    0xFF7A3E00
+            );
+            autoWarning.setPadding(dp(12), dp(12), dp(12), dp(12));
+            autoWarning.setBackgroundColor(0xFFFFF3E0);
+            root.addView(autoWarning);
+
+            CheckBox autoEnabled = new CheckBox(this);
+            autoEnabled.setText("我了解風險，允許啟動全自動實驗功能");
+            autoEnabled.setChecked(AutoSettings.load(this).autoEnabled);
+            autoEnabled.setOnCheckedChangeListener((buttonView, checked) -> {
+                AutoSettings settings = AutoSettings.load(this);
+                settings.autoEnabled = checked;
+                settings.save(this);
+                toast(checked ? "已允許全自動實驗功能" : "已停用全自動實驗功能");
+            });
+            root.addView(autoEnabled);
+
+            Button autoSettings = button("全自動操作設定");
+            autoSettings.setOnClickListener(v -> showAutoSettingsDialog());
+            root.addView(autoSettings);
+
+            TextView catchGestureInfo = text(
+                    "預設捕捉手勢：原地速量留刪除前 4 條後的剩餘 5 條軌跡；" +
+                            "保留原本起點與長度，並與一般手勢版本分開保存。",
+                    14f,
+                    0xFF455A64
+            );
+            catchGestureInfo.setPadding(dp(12), dp(8), dp(12), dp(8));
+            root.addView(catchGestureInfo);
+
+            Button restoreCatchGesture = button("恢復預設捕捉手勢");
+            restoreCatchGesture.setOnClickListener(v ->
+                    new AlertDialog.Builder(this)
+                            .setTitle("恢復預設捕捉手勢？")
+                            .setMessage(
+                                    "將捕捉手勢恢復為「原地速量留」刪除前 4 條後" +
+                                            "剩餘的 5 條軌跡。一般手勢與保存版本不受影響。"
+                            )
+                            .setNegativeButton("取消", null)
+                            .setPositiveButton("恢復", (dialog, which) -> {
+                                CatchGestureStore.restoreBuiltIn(this);
+                                toast("已恢復預設捕捉手勢");
+                            })
+                            .show());
+            root.addView(restoreCatchGesture);
+        }
 
         Button accessibility = button("開啟無障礙服務設定");
         accessibility.setOnClickListener(v ->
@@ -513,6 +572,222 @@ public final class MainActivity extends Activity {
                 input.getPaddingBottom()
         );
         return input;
+    }
+
+    private void showAutoSettingsDialog() {
+        AutoSettings settings = AutoSettings.load(this);
+        ScrollView scroll = new ScrollView(this);
+        LinearLayout fields = new LinearLayout(this);
+        fields.setOrientation(LinearLayout.VERTICAL);
+        fields.setPadding(dp(20), dp(8), dp(20), dp(8));
+        scroll.addView(fields);
+
+        EditText scanDescription = addTextField(
+                fields,
+                "掃描步驟名稱／描述",
+                settings.scanDescription
+        );
+        EditText encounterDescription = addTextField(
+                fields,
+                "捕捉步驟名稱／描述",
+                settings.encounterDescription
+        );
+        EditText rocketDescription = addTextField(
+                fields,
+                "火箭隊步驟名稱／描述",
+                settings.rocketDescription
+        );
+        EditText exitDescription = addTextField(
+                fields,
+                "退出步驟名稱／描述",
+                settings.exitDescription
+        );
+        EditText scanInterval = addNumberField(
+                fields,
+                "掃描間隔（秒，0.1 為單位）",
+                settings.scanIntervalMs / 1000f
+        );
+        EditText afterTarget = addNumberField(
+                fields,
+                "點擊候選後等待判斷（秒）",
+                settings.afterTargetTapMs / 1000f
+        );
+        EditText rocketInterval = addNumberField(
+                fields,
+                "火箭隊每次對話點擊間隔（秒）",
+                settings.rocketTapIntervalMs / 1000f
+        );
+        EditText rocketCount = addIntegerField(
+                fields,
+                "火箭隊對話點擊次數",
+                settings.rocketTapCount
+        );
+        EditText beforeCatch = addNumberField(
+                fields,
+                "確認捕捉畫面後等待（秒）",
+                settings.beforeCatchMs / 1000f
+        );
+        EditText afterCatch = addNumberField(
+                fields,
+                "播放捕捉手勢後等待（秒）",
+                settings.afterCatchMs / 1000f
+        );
+        EditText afterExit = addNumberField(
+                fields,
+                "按 X 後等待（秒）",
+                settings.afterExitMs / 1000f
+        );
+        EditText rocketX = addNumberField(
+                fields,
+                "火箭隊對話點擊 X（螢幕百分比）",
+                settings.rocketTapXRatio * 100f
+        );
+        EditText rocketY = addNumberField(
+                fields,
+                "火箭隊對話點擊 Y（螢幕百分比）",
+                settings.rocketTapYRatio * 100f
+        );
+        EditText exitX = addNumberField(
+                fields,
+                "退出 X 座標（螢幕百分比）",
+                settings.exitXRatio * 100f
+        );
+        EditText exitY = addNumberField(
+                fields,
+                "退出 Y 座標（螢幕百分比）",
+                settings.exitYRatio * 100f
+        );
+
+        new AlertDialog.Builder(this)
+                .setTitle("全自動操作設定")
+                .setMessage("畫面辨識條件不可修改；以下操作參數都可修改。")
+                .setView(scroll)
+                .setNeutralButton("恢復預設", (dialog, which) -> {
+                    AutoSettings.reset(this);
+                    toast("已恢復預設操作設定");
+                })
+                .setNegativeButton("取消", null)
+                .setPositiveButton("保存", (dialog, which) -> {
+                    settings.scanDescription =
+                            nonEmpty(scanDescription, settings.scanDescription);
+                    settings.encounterDescription =
+                            nonEmpty(encounterDescription, settings.encounterDescription);
+                    settings.rocketDescription =
+                            nonEmpty(rocketDescription, settings.rocketDescription);
+                    settings.exitDescription =
+                            nonEmpty(exitDescription, settings.exitDescription);
+                    settings.scanIntervalMs = seconds(scanInterval, settings.scanIntervalMs);
+                    settings.afterTargetTapMs = seconds(afterTarget, settings.afterTargetTapMs);
+                    settings.rocketTapIntervalMs =
+                            seconds(rocketInterval, settings.rocketTapIntervalMs);
+                    settings.beforeCatchMs = seconds(beforeCatch, settings.beforeCatchMs);
+                    settings.afterCatchMs = seconds(afterCatch, settings.afterCatchMs);
+                    settings.afterExitMs = seconds(afterExit, settings.afterExitMs);
+                    settings.rocketTapCount =
+                            integerValue(rocketCount, settings.rocketTapCount, 1, 5);
+                    settings.rocketTapXRatio =
+                            percentage(rocketX, settings.rocketTapXRatio);
+                    settings.rocketTapYRatio =
+                            percentage(rocketY, settings.rocketTapYRatio);
+                    settings.exitXRatio =
+                            percentage(exitX, settings.exitXRatio);
+                    settings.exitYRatio =
+                            percentage(exitY, settings.exitYRatio);
+                    settings.save(this);
+                    toast("已保存全自動操作設定");
+                })
+                .show();
+    }
+
+    private EditText addTextField(
+            LinearLayout parent,
+            String label,
+            String value
+    ) {
+        parent.addView(text(label, 13f, 0xFF555555));
+        EditText input = new EditText(this);
+        input.setSingleLine(false);
+        input.setMaxLines(3);
+        input.setText(value);
+        parent.addView(input);
+        return input;
+    }
+
+    private EditText addNumberField(
+            LinearLayout parent,
+            String label,
+            float value
+    ) {
+        parent.addView(text(label, 13f, 0xFF555555));
+        EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setInputType(
+                InputType.TYPE_CLASS_NUMBER |
+                        InputType.TYPE_NUMBER_FLAG_DECIMAL
+        );
+        input.setText(String.format(Locale.TAIWAN, "%.1f", value));
+        parent.addView(input);
+        return input;
+    }
+
+    private EditText addIntegerField(
+            LinearLayout parent,
+            String label,
+            int value
+    ) {
+        parent.addView(text(label, 13f, 0xFF555555));
+        EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setInputType(InputType.TYPE_CLASS_NUMBER);
+        input.setText(String.valueOf(value));
+        parent.addView(input);
+        return input;
+    }
+
+    private String nonEmpty(EditText input, String fallback) {
+        String value = input.getText().toString().trim();
+        return value.isEmpty() ? fallback : value;
+    }
+
+    private long seconds(EditText input, long fallback) {
+        try {
+            float value = Float.parseFloat(input.getText().toString());
+            return Math.max(
+                    100L,
+                    Math.min(60000L, Math.round(value * 10f) * 100L)
+            );
+        } catch (NumberFormatException ignored) {
+            return fallback;
+        }
+    }
+
+    private int integerValue(
+            EditText input,
+            int fallback,
+            int minimum,
+            int maximum
+    ) {
+        try {
+            return Math.max(
+                    minimum,
+                    Math.min(maximum, Integer.parseInt(input.getText().toString()))
+            );
+        } catch (NumberFormatException ignored) {
+            return fallback;
+        }
+    }
+
+    private float percentage(EditText input, float fallback) {
+        try {
+            float value = Float.parseFloat(input.getText().toString()) / 100f;
+            return Math.max(0.02f, Math.min(0.98f, value));
+        } catch (NumberFormatException ignored) {
+            return fallback;
+        }
+    }
+
+    private boolean isExperimentalBuild() {
+        return getPackageName().endsWith(".autoexperimental");
     }
 
     private void play(boolean loop) {

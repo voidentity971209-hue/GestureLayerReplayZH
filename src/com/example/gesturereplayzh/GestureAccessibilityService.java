@@ -31,6 +31,8 @@ public final class GestureAccessibilityService extends AccessibilityService {
     private View floatingControls;
     private WindowManager.LayoutParams floatingParams;
     private boolean gestureInFlight;
+    private AutoPilotController autoPilotController;
+    private Button autoControlButton;
 
     static GestureAccessibilityService getInstance() {
         return instance;
@@ -39,6 +41,10 @@ public final class GestureAccessibilityService extends AccessibilityService {
     @Override
     protected void onServiceConnected() {
         instance = this;
+        if (isExperimentalBuild()) {
+            CatchGestureStore.ensureInstalled(this);
+            autoPilotController = new AutoPilotController(this);
+        }
         showFloatingControls();
         toast("手勢服務已啟用");
     }
@@ -70,6 +76,15 @@ public final class GestureAccessibilityService extends AccessibilityService {
     }
 
     void stopPlayback() {
+        if (autoPilotController != null) {
+            autoPilotController.stop();
+        }
+        setAutoPanelRunning(false);
+        cancelGesturePlayback();
+        toast("已停止播放");
+    }
+
+    private void cancelGesturePlayback() {
         generation.incrementAndGet();
         handler.removeCallbacksAndMessages(null);
         boolean shouldCancelGesture = gestureInFlight;
@@ -77,10 +92,20 @@ public final class GestureAccessibilityService extends AccessibilityService {
         if (shouldCancelGesture) {
             cancelCurrentGesture();
         }
-        toast("已停止播放");
     }
 
     void play(List<GestureLayer> layers, boolean loop) {
+        if (autoPilotController != null) {
+            autoPilotController.stop();
+        }
+        playInternal(layers, loop);
+    }
+
+    void playAutoGesture(List<GestureLayer> layers) {
+        playInternal(layers, false);
+    }
+
+    private void playInternal(List<GestureLayer> layers, boolean loop) {
         final int token = generation.incrementAndGet();
         handler.removeCallbacksAndMessages(null);
         dispatchLayers(layers, loop, token);
@@ -103,12 +128,17 @@ public final class GestureAccessibilityService extends AccessibilityService {
         Button playOnce = floatingButton("播");
         Button playLoop = floatingButton("循");
         Button stop = floatingButton("停");
+        Button auto = isExperimentalBuild() ? floatingButton("自") : null;
+        autoControlButton = auto;
         Button close = floatingButton("×");
         panel.addView(drag);
         panel.addView(record);
         panel.addView(playOnce);
         panel.addView(playLoop);
         panel.addView(stop);
+        if (auto != null) {
+            panel.addView(auto);
+        }
         panel.addView(close);
 
         floatingParams = new WindowManager.LayoutParams(
@@ -164,6 +194,21 @@ public final class GestureAccessibilityService extends AccessibilityService {
         playLoop.setOnClickListener(view ->
                 play(GestureStore.load(this), true));
         stop.setOnClickListener(view -> stopPlayback());
+        if (auto != null) {
+            auto.setOnClickListener(view -> {
+                if (autoPilotController.isActive()) {
+                    stopPlayback();
+                } else {
+                    if (!AutoSettings.load(this).autoEnabled) {
+                        toast("請先回主程式勾選允許全自動實驗功能");
+                        return;
+                    }
+                    cancelGesturePlayback();
+                    autoPilotController.start();
+                    setAutoPanelRunning(true);
+                }
+            });
+        }
         close.setOnClickListener(view -> {
             stopPlayback();
             hideFloatingControls();
@@ -177,6 +222,7 @@ public final class GestureAccessibilityService extends AccessibilityService {
         if (floatingControls != null && windowManager != null) {
             windowManager.removeView(floatingControls);
             floatingControls = null;
+            autoControlButton = null;
         }
     }
 
@@ -291,6 +337,67 @@ public final class GestureAccessibilityService extends AccessibilityService {
 
     private float scaled(float value, float scale, int targetSize) {
         return Math.max(0f, Math.min(targetSize - 1f, value * scale));
+    }
+
+    void dispatchAutoTap(float x, float y, Runnable completion) {
+        Path tapPath = new Path();
+        tapPath.moveTo(x, y);
+        boolean accepted = dispatchGesture(
+                new GestureDescription.Builder()
+                        .addStroke(new GestureDescription.StrokeDescription(
+                                tapPath,
+                                0L,
+                                80L
+                        ))
+                        .build(),
+                new GestureResultCallback() {
+                    @Override
+                    public void onCompleted(GestureDescription gestureDescription) {
+                        gestureInFlight = false;
+                        completion.run();
+                    }
+
+                    @Override
+                    public void onCancelled(GestureDescription gestureDescription) {
+                        gestureInFlight = false;
+                        completion.run();
+                    }
+                },
+                null
+        );
+        gestureInFlight = accepted;
+        if (!accepted) {
+            completion.run();
+        }
+    }
+
+    void autoStatus(String message) {
+        toast(message);
+    }
+
+    private void setAutoPanelRunning(boolean running) {
+        if (!(floatingControls instanceof LinearLayout) ||
+                autoControlButton == null) {
+            return;
+        }
+        LinearLayout panel = (LinearLayout) floatingControls;
+        for (int i = 0; i < panel.getChildCount(); i++) {
+            View child = panel.getChildAt(i);
+            child.setVisibility(
+                    !running || child == autoControlButton
+                            ? View.VISIBLE
+                            : View.GONE
+            );
+        }
+        autoControlButton.setText(running ? "自停" : "自");
+        LinearLayout.LayoutParams params =
+                (LinearLayout.LayoutParams) autoControlButton.getLayoutParams();
+        params.width = dp(running ? 36 : 46);
+        autoControlButton.setLayoutParams(params);
+    }
+
+    private boolean isExperimentalBuild() {
+        return getPackageName().endsWith(".autoexperimental");
     }
 
     private void cancelCurrentGesture() {
