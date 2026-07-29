@@ -6,6 +6,7 @@ import android.content.SharedPreferences;
 final class AutoSettings {
     private static final String PREFS = "auto_operation_settings";
     private static final String V7_TIMING_MIGRATED = "v7_timing_migrated";
+    static final String CURRENT_GESTURE_SOURCE = "current";
 
     String scanDescription;
     String encounterDescription;
@@ -21,6 +22,7 @@ final class AutoSettings {
     float rocketTapYRatio;
     float exitXRatio;
     float exitYRatio;
+    String catchGestureSourceId;
     boolean autoEnabled;
 
     static AutoSettings load(Context context) {
@@ -92,6 +94,10 @@ final class AutoSettings {
                 "exitYRatio",
                 settings.exitYRatio
         );
+        settings.catchGestureSourceId = values.getString(
+                "catchGestureSourceId",
+                settings.catchGestureSourceId
+        );
         settings.autoEnabled = values.getBoolean(
                 "autoEnabled",
                 settings.autoEnabled
@@ -129,6 +135,12 @@ final class AutoSettings {
                 .putFloat("rocketTapYRatio", normalizeRatio(rocketTapYRatio))
                 .putFloat("exitXRatio", normalizeRatio(exitXRatio))
                 .putFloat("exitYRatio", normalizeRatio(exitYRatio))
+                .putString(
+                        "catchGestureSourceId",
+                        catchGestureSourceId == null
+                                ? CURRENT_GESTURE_SOURCE
+                                : catchGestureSourceId
+                )
                 .putBoolean("autoEnabled", autoEnabled)
                 .apply();
     }
@@ -156,6 +168,7 @@ final class AutoSettings {
         settings.rocketTapYRatio = 0.69f;
         settings.exitXRatio = 0.50f;
         settings.exitYRatio = 0.938f;
+        settings.catchGestureSourceId = CURRENT_GESTURE_SOURCE;
         settings.autoEnabled = false;
         return settings;
     }

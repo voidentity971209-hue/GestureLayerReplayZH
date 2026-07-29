@@ -14,12 +14,13 @@ import java.util.List;
 
 final class AutoPilotController {
     private static final int MAP_FRAME_COUNT = 3;
-    private static final long MAP_FRAME_GAP_MS = 220L;
-    private static final long POST_TAP_CLASSIFY_DELAY_MS = 2000L;
-    private static final long OPEN_SCREEN_POLL_MS = 400L;
-    private static final int MAX_OPEN_SCREEN_POLLS = 9;
-    private static final int REQUIRED_ENCOUNTER_POLLS = 2;
-    private static final int REQUIRED_UNKNOWN_POLLS = 9;
+    private static final long MAP_FRAME_GAP_MS = 40L;
+    private static final long MIN_SCREENSHOT_INTERVAL_MS = 350L;
+    private static final long POST_TAP_CLASSIFY_DELAY_MS = 650L;
+    private static final long OPEN_SCREEN_POLL_MS = 250L;
+    private static final int MAX_OPEN_SCREEN_POLLS = 6;
+    private static final int REQUIRED_ENCOUNTER_POLLS = 1;
+    private static final int REQUIRED_UNKNOWN_POLLS = 4;
     private static final int MAX_CATCH_RETRIES = 2;
     private static final long CATCH_RETRY_DELAY_MS = 900L;
 
@@ -32,6 +33,7 @@ final class AutoPilotController {
     private boolean screenshotPending;
     private int screenshotFailures;
     private int generation;
+    private long lastScreenshotRequestAt;
     private AutoScreenAnalyzer.FrameSignature mapBeforeTap;
     private AutoScreenAnalyzer.TargetCandidate lastTarget;
 
@@ -335,9 +337,10 @@ final class AutoPilotController {
             );
             return;
         }
-        List<GestureLayer> catchLayers = GestureStore.load(service);
+        AutoSettings settings = AutoSettings.load(service);
+        List<GestureLayer> catchLayers = loadCatchLayers(settings);
         if (catchLayers.isEmpty()) {
-            service.autoStatus("目前套用的手勢不存在，已停止自動辨識");
+            service.autoStatus("選定的捕捉手勢不存在，已停止自動辨識");
             stop();
             return;
         }
@@ -345,6 +348,9 @@ final class AutoPilotController {
         recycleMapFrames();
         mapBeforeTap = null;
         lastTarget = null;
+        service.autoStatus(
+                "播放捕捉手勢：" + catchLayers.size() + " 條軌跡"
+        );
         service.playAutoGesture(
                 catchLayers,
                 new GestureAccessibilityService.AutoGestureCallback() {
@@ -392,6 +398,22 @@ final class AutoPilotController {
         );
     }
 
+    private List<GestureLayer> loadCatchLayers(AutoSettings settings) {
+        if (settings.catchGestureSourceId == null ||
+                AutoSettings.CURRENT_GESTURE_SOURCE.equals(
+                        settings.catchGestureSourceId
+                )) {
+            return GestureStore.load(service);
+        }
+        for (SavedVersionStore.SavedVersion version :
+                SavedVersionStore.load(service)) {
+            if (version.id.equals(settings.catchGestureSourceId)) {
+                return SavedVersionStore.copyLayers(version.layers);
+            }
+        }
+        return GestureStore.load(service);
+    }
+
     private void confirmEncounterAndRetry(int token, int retryCount) {
         if (!isCurrent(token)) {
             return;
@@ -432,6 +454,14 @@ final class AutoPilotController {
         if (!isCurrent(token)) {
             return;
         }
+        long elapsed = System.currentTimeMillis() - lastScreenshotRequestAt;
+        if (elapsed < MIN_SCREENSHOT_INTERVAL_MS) {
+            handler.postDelayed(
+                    () -> takeScreenshot(token, receiver),
+                    MIN_SCREENSHOT_INTERVAL_MS - elapsed
+            );
+            return;
+        }
         if (screenshotPending) {
             handler.postDelayed(
                     () -> takeScreenshot(token, receiver),
@@ -440,6 +470,7 @@ final class AutoPilotController {
             return;
         }
         screenshotPending = true;
+        lastScreenshotRequestAt = System.currentTimeMillis();
         service.takeScreenshot(
                 Display.DEFAULT_DISPLAY,
                 service.getMainExecutor(),
@@ -501,7 +532,7 @@ final class AutoPilotController {
                             if (screenshotFailures <= 3) {
                                 handler.postDelayed(
                                         () -> takeScreenshot(token, receiver),
-                                        600L
+                                        MIN_SCREENSHOT_INTERVAL_MS
                                 );
                             } else {
                                 screenshotFailures = 0;

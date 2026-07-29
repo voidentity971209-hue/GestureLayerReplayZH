@@ -15,6 +15,8 @@ import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.ArrayAdapter;
+import android.widget.Spinner;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -37,6 +39,7 @@ public final class MainActivity extends Activity {
     private LinearLayout layerContainer;
     private LinearLayout versionContainer;
     private TextView serviceStatus;
+    private TextView catchGestureInfo;
     private List<GestureLayer> layers;
     private List<SavedVersionStore.SavedVersion> versions;
     private Runnable pendingPlayback;
@@ -109,9 +112,8 @@ public final class MainActivity extends Activity {
             autoSettings.setOnClickListener(v -> showAutoSettingsDialog());
             root.addView(autoSettings);
 
-            TextView catchGestureInfo = text(
-                    "自動捕捉會直接播放主畫面目前套用的手勢。" +
-                            "你可以修改軌跡、起點、長度與順序，或先套用任一保存版本。",
+            catchGestureInfo = text(
+                    "",
                     14f,
                     0xFF455A64
             );
@@ -272,6 +274,7 @@ public final class MainActivity extends Activity {
             }
         }
         refreshVersions();
+        refreshCatchGestureInfo();
     }
 
     private void addLayerRow(int index, GestureLayer layer) {
@@ -558,6 +561,13 @@ public final class MainActivity extends Activity {
     private void showAutoSettingsDialog() {
         AutoSettings settings = AutoSettings.load(this);
         ScrollView scroll = new ScrollView(this);
+        int dialogContentHeight = Math.round(
+                getResources().getDisplayMetrics().heightPixels * 0.52f
+        );
+        scroll.setLayoutParams(new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dialogContentHeight
+        ));
         LinearLayout fields = new LinearLayout(this);
         fields.setOrientation(LinearLayout.VERTICAL);
         fields.setPadding(dp(20), dp(8), dp(20), dp(8));
@@ -633,6 +643,37 @@ public final class MainActivity extends Activity {
                 "退出 Y 座標（螢幕百分比）",
                 settings.exitYRatio * 100f
         );
+        fields.addView(text("捕捉手勢來源", 13f, 0xFF555555));
+        List<SavedVersionStore.SavedVersion> availableVersions =
+                SavedVersionStore.load(this);
+        List<String> sourceIds = new java.util.ArrayList<>();
+        List<String> sourceLabels = new java.util.ArrayList<>();
+        sourceIds.add(AutoSettings.CURRENT_GESTURE_SOURCE);
+        sourceLabels.add(
+                "目前套用手勢（" + GestureStore.load(this).size() + " 條）"
+        );
+        int selectedSource = 0;
+        for (SavedVersionStore.SavedVersion version : availableVersions) {
+            if (version.layers.isEmpty()) {
+                continue;
+            }
+            sourceIds.add(version.id);
+            sourceLabels.add(
+                    "保存版本：" + version.name +
+                            "（" + version.layers.size() + " 條）"
+            );
+            if (version.id.equals(settings.catchGestureSourceId)) {
+                selectedSource = sourceIds.size() - 1;
+            }
+        }
+        Spinner catchGestureSource = new Spinner(this);
+        catchGestureSource.setAdapter(new ArrayAdapter<>(
+                this,
+                android.R.layout.simple_spinner_dropdown_item,
+                sourceLabels
+        ));
+        catchGestureSource.setSelection(selectedSource);
+        fields.addView(catchGestureSource);
 
         new AlertDialog.Builder(this)
                 .setTitle("全自動操作設定")
@@ -668,10 +709,54 @@ public final class MainActivity extends Activity {
                             percentage(exitX, settings.exitXRatio);
                     settings.exitYRatio =
                             percentage(exitY, settings.exitYRatio);
+                    settings.catchGestureSourceId =
+                            sourceIds.get(catchGestureSource.getSelectedItemPosition());
                     settings.save(this);
+                    refreshCatchGestureInfo();
                     toast("已保存全自動操作設定");
                 })
                 .show();
+    }
+
+    private void refreshCatchGestureInfo() {
+        if (catchGestureInfo == null) {
+            return;
+        }
+        AutoSettings settings = AutoSettings.load(this);
+        List<GestureLayer> selectedLayers;
+        String sourceName = "目前套用手勢";
+        if (AutoSettings.CURRENT_GESTURE_SOURCE.equals(
+                settings.catchGestureSourceId
+        )) {
+            selectedLayers = GestureStore.load(this);
+        } else {
+            selectedLayers = null;
+            for (SavedVersionStore.SavedVersion version :
+                    SavedVersionStore.load(this)) {
+                if (version.id.equals(settings.catchGestureSourceId)) {
+                    sourceName = "保存版本「" + version.name + "」";
+                    selectedLayers = version.layers;
+                    break;
+                }
+            }
+            if (selectedLayers == null) {
+                sourceName = "目前套用手勢（原保存版本已不存在）";
+                selectedLayers = GestureStore.load(this);
+            }
+        }
+        long totalDuration = 0L;
+        for (GestureLayer layer : selectedLayers) {
+            totalDuration = Math.max(
+                    totalDuration,
+                    layer.startDelayMs + layer.durationMs
+            );
+        }
+        catchGestureInfo.setText(
+                "自動捕捉來源：" + sourceName + "\n" +
+                        "實際會播放 " + selectedLayers.size() +
+                        " 條軌跡，總長 " + formatSeconds(totalDuration) +
+                        " 秒。可在「全自動操作設定」切換目前手勢或保存版本。"
+        );
     }
 
     private EditText addTextField(
