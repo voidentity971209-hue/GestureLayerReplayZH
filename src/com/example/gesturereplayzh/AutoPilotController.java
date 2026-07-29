@@ -14,7 +14,7 @@ import java.util.List;
 
 final class AutoPilotController {
     private static final int MAP_FRAME_COUNT = 3;
-    private static final long MAP_FRAME_GAP_MS = 450L;
+    private static final long MAP_FRAME_GAP_MS = 220L;
     private static final long POST_TAP_CLASSIFY_DELAY_MS = 2000L;
     private static final long OPEN_SCREEN_POLL_MS = 400L;
     private static final int MAX_OPEN_SCREEN_POLLS = 9;

@@ -24,7 +24,8 @@ final class AutoScreenAnalyzer {
 
     enum TargetType {
         POKEMON,
-        BLUE_STOP
+        BLUE_STOP,
+        GYM
     }
 
     static final class TargetCandidate {
@@ -135,7 +136,7 @@ final class AutoScreenAnalyzer {
             return null;
         }
 
-        int gridStep = Math.max(3, width / 170);
+        int gridStep = Math.max(4, width / 145);
         int columns = Math.max(1, (bounds.right - bounds.left) / gridStep);
         int rows = Math.max(1, (bounds.bottom - bounds.top) / gridStep);
         int[] differences = new int[columns * rows];
@@ -179,9 +180,8 @@ final class AutoScreenAnalyzer {
             }
         }
 
-        boolean[] joinedMotion = dilate(rawMotion, columns, rows);
         List<Component> components = components(
-                joinedMotion,
+                rawMotion,
                 rawMotion,
                 differences,
                 columns,
@@ -208,8 +208,9 @@ final class AutoScreenAnalyzer {
                         candidate.confidence > bestPokemon.confidence) {
                     bestPokemon = candidate;
                 }
-            } else if (bestBlueStop == null ||
-                    candidate.confidence > bestBlueStop.confidence) {
+            } else if (candidate.type == TargetType.BLUE_STOP &&
+                    (bestBlueStop == null ||
+                            candidate.confidence > bestBlueStop.confidence)) {
                 bestBlueStop = candidate;
             }
         }
@@ -283,13 +284,23 @@ final class AutoScreenAnalyzer {
                 local.edgeRatio < 0.075f &&
                         compactness < 0.28f &&
                         area > width * height * 0.0025f;
-        boolean largeStructure =
-                surrounding.redWhiteRatio > 0.24f &&
-                        objectHeight > height * 0.035f;
         boolean purpleStop =
                 local.neonMagentaRatio > 0.14f &&
                         objectHeight > height * 0.020f;
-        if (flatTerrain || largeStructure || purpleStop) {
+        float boxWidthCells =
+                component.maxColumn - component.minColumn + 1f;
+        float boxHeightCells =
+                component.maxRow - component.minRow + 1f;
+        float elongation = Math.max(boxWidthCells, boxHeightCells) /
+                Math.max(1f, Math.min(boxWidthCells, boxHeightCells));
+        boolean thinBoundary =
+                elongation > 2.60f ||
+                        compactness < 0.24f && component.activeCells >= 5;
+        boolean yellowGreenBoundary =
+                local.yellowGreenRatio > 0.43f &&
+                        (compactness < 0.48f || elongation > 1.65f) &&
+                        local.shadowRatio < 0.16f;
+        if (flatTerrain || thinBoundary || yellowGreenBoundary || purpleStop) {
             return null;
         }
 
@@ -312,7 +323,20 @@ final class AutoScreenAnalyzer {
         boolean blueStop =
                 local.cyanRatio > 0.22f &&
                         local.cyanRatio > local.warmRatio * 1.65f &&
-                        objectHeight > height * 0.025f;
+                        objectWidth >= width * 0.025f &&
+                        objectWidth <= width * 0.18f &&
+                        objectHeight > height * 0.025f &&
+                        objectHeight <= height * 0.13f;
+        boolean gymLike =
+                (
+                        objectWidth > width * 0.12f ||
+                                objectHeight > height * 0.085f ||
+                                area > width * height * 0.008f
+                ) &&
+                        (
+                                surrounding.redWhiteRatio > 0.14f ||
+                                        local.cyanRatio > 0.18f
+                        );
         float aspectRatio = objectHeight / (float) Math.max(1, objectWidth);
         boolean personLike =
                 objectHeight > height * 0.050f &&
@@ -327,6 +351,13 @@ final class AutoScreenAnalyzer {
                         objectHeight >= height * 0.012f &&
                         objectHeight <= height * 0.085f &&
                         !personLike;
+        if (gymLike) {
+            return new TargetCandidate(
+                    TargetType.GYM,
+                    new PointF(weightedX, weightedY),
+                    confidence
+            );
+        }
         if (!blueStop && !pokemonLike) {
             return null;
         }
@@ -422,7 +453,7 @@ final class AutoScreenAnalyzer {
                 y + lastShift.dy,
                 reference
         );
-        return Math.max(
+        return Math.min(
                 colorDifference(reference, firstColor),
                 colorDifference(reference, lastColor)
         );
@@ -447,32 +478,6 @@ final class AutoScreenAnalyzer {
         int below = safePixel(bitmap, x, y + step, center);
         return (colorDifference(center, right) +
                 colorDifference(center, below)) / 2;
-    }
-
-    private static boolean[] dilate(
-            boolean[] source,
-            int columns,
-            int rows
-    ) {
-        boolean[] result = new boolean[source.length];
-        for (int row = 0; row < rows; row++) {
-            for (int column = 0; column < columns; column++) {
-                boolean value = false;
-                for (int dy = -1; dy <= 1 && !value; dy++) {
-                    for (int dx = -1; dx <= 1; dx++) {
-                        int x = column + dx;
-                        int y = row + dy;
-                        if (x >= 0 && y >= 0 && x < columns && y < rows &&
-                                source[y * columns + x]) {
-                            value = true;
-                            break;
-                        }
-                    }
-                }
-                result[row * columns + column] = value;
-            }
-        }
-        return result;
     }
 
     private static List<Component> components(
@@ -534,6 +539,7 @@ final class AutoScreenAnalyzer {
         int cyan = 0;
         int neonMagenta = 0;
         int warm = 0;
+        int yellowGreen = 0;
         int redWhite = 0;
         int edge = 0;
         int shadow = 0;
@@ -556,6 +562,11 @@ final class AutoScreenAnalyzer {
                 if (r > 135 && r > b * 1.16f && g > b * 0.80f) {
                     warm++;
                 }
+                if (g > 110 && b < 125 &&
+                        g > b * 1.22f &&
+                        (r > 105 || g > r * 1.12f)) {
+                    yellowGreen++;
+                }
                 boolean strongRed =
                         r > 175 && r > g * 1.42f && r > b * 1.32f;
                 boolean nearWhite =
@@ -575,6 +586,7 @@ final class AutoScreenAnalyzer {
                 cyan / (float) Math.max(1, total),
                 neonMagenta / (float) Math.max(1, total),
                 warm / (float) Math.max(1, total),
+                yellowGreen / (float) Math.max(1, total),
                 redWhite / (float) Math.max(1, total),
                 edge / (float) Math.max(1, total),
                 shadow / (float) Math.max(1, total)
@@ -776,6 +788,7 @@ final class AutoScreenAnalyzer {
         final float cyanRatio;
         final float neonMagentaRatio;
         final float warmRatio;
+        final float yellowGreenRatio;
         final float redWhiteRatio;
         final float edgeRatio;
         final float shadowRatio;
@@ -784,6 +797,7 @@ final class AutoScreenAnalyzer {
                 float cyanRatio,
                 float neonMagentaRatio,
                 float warmRatio,
+                float yellowGreenRatio,
                 float redWhiteRatio,
                 float edgeRatio,
                 float shadowRatio
@@ -791,6 +805,7 @@ final class AutoScreenAnalyzer {
             this.cyanRatio = cyanRatio;
             this.neonMagentaRatio = neonMagentaRatio;
             this.warmRatio = warmRatio;
+            this.yellowGreenRatio = yellowGreenRatio;
             this.redWhiteRatio = redWhiteRatio;
             this.edgeRatio = edgeRatio;
             this.shadowRatio = shadowRatio;
