@@ -112,6 +112,26 @@ public final class MainActivity extends Activity {
             autoSettings.setOnClickListener(v -> showAutoSettingsDialog());
             root.addView(autoSettings);
 
+            Button useCurrentForAuto = button("將目前手勢設為自動捕捉");
+            useCurrentForAuto.setOnClickListener(v -> {
+                List<GestureLayer> current = GestureStore.load(this);
+                if (current.isEmpty()) {
+                    toast("目前沒有可用的手勢");
+                    return;
+                }
+                AutoSettings settings = AutoSettings.load(this);
+                settings.catchGestureSourceId =
+                        AutoSettings.CURRENT_GESTURE_SOURCE;
+                settings.save(this);
+                refreshCatchGestureInfo();
+                toast(
+                        "已指定目前手勢：" + current.size() +
+                                " 條，識別碼 " +
+                                GestureIdentity.fingerprint(current)
+                );
+            });
+            root.addView(useCurrentForAuto);
+
             catchGestureInfo = text(
                     "",
                     14f,
@@ -791,18 +811,14 @@ public final class MainActivity extends Activity {
                 selectedLayers = GestureStore.load(this);
             }
         }
-        long totalDuration = 0L;
-        for (GestureLayer layer : selectedLayers) {
-            totalDuration = Math.max(
-                    totalDuration,
-                    layer.startDelayMs + layer.durationMs
-            );
-        }
+        long totalDuration = GestureIdentity.totalDuration(selectedLayers);
         catchGestureInfo.setText(
                 "自動捕捉來源：" + sourceName + "\n" +
                         "實際會播放 " + selectedLayers.size() +
                         " 條軌跡，總長 " + formatSeconds(totalDuration) +
-                        " 秒。可在「全自動操作設定」切換目前手勢或保存版本。"
+                        " 秒，識別碼 " +
+                        GestureIdentity.fingerprint(selectedLayers) + "。\n" +
+                        "修改目前軌跡後會自動改用目前手勢；一般版與實驗版資料不共用。"
         );
     }
 

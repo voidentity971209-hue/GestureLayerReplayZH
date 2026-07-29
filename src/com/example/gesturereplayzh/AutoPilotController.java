@@ -349,7 +349,9 @@ final class AutoPilotController {
         mapBeforeTap = null;
         lastTarget = null;
         service.autoStatus(
-                "播放捕捉手勢：" + catchLayers.size() + " 條軌跡"
+                "播放捕捉手勢：" + catchLayers.size() +
+                        " 條，識別碼 " +
+                        GestureIdentity.fingerprint(catchLayers)
         );
         service.playAutoGesture(
                 catchLayers,
