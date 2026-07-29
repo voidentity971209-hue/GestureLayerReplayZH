@@ -11,8 +11,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 final class BuiltInGestureStore {
-    private static final String BUILT_IN_ID = "builtin-original-v1";
-    private static final String BUILT_IN_NAME = "原版";
+    private static final String BUILT_IN_ID = "builtin-stationary-speed-v1";
+    private static final String BUILT_IN_NAME = "原地速量留";
 
     private BuiltInGestureStore() {}
 
@@ -28,7 +28,9 @@ final class BuiltInGestureStore {
 
         try (
                 InputStream input =
-                        context.getResources().openRawResource(R.raw.builtin_original);
+                        context.getResources().openRawResource(
+                                R.raw.builtin_stationary_speed
+                        );
                 ByteArrayOutputStream output = new ByteArrayOutputStream()
         ) {
             byte[] buffer = new byte[4096];
@@ -61,6 +63,12 @@ final class BuiltInGestureStore {
             if (!version.layers.isEmpty()) {
                 versions.add(0, version);
                 SavedVersionStore.save(context, versions);
+                if (GestureStore.load(context).isEmpty()) {
+                    GestureStore.save(
+                            context,
+                            SavedVersionStore.copyLayers(version.layers)
+                    );
+                }
             }
         } catch (Exception ignored) {
             // A malformed built-in resource must never block the main app.
