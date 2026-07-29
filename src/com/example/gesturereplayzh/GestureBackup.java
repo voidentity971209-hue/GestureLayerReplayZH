@@ -14,7 +14,7 @@ final class GestureBackup {
     static JSONObject create(Context context) throws JSONException {
         JSONObject root = new JSONObject();
         root.put("format", "GestureLayerReplayZH");
-        root.put("schemaVersion", 1);
+        root.put("schemaVersion", 2);
         root.put("exportedAt", System.currentTimeMillis());
 
         JSONArray activeLayers = new JSONArray();
@@ -22,6 +22,16 @@ final class GestureBackup {
             activeLayers.put(layer.toJson());
         }
         root.put("activeLayers", activeLayers);
+
+        JSONArray autoCatchLayers = new JSONArray();
+        for (GestureLayer layer : AutoCatchGestureStore.load(context)) {
+            autoCatchLayers.put(layer.toJson());
+        }
+        root.put("autoCatchLayers", autoCatchLayers);
+        root.put(
+                "autoCatchAppliedAt",
+                AutoCatchGestureStore.appliedAt(context)
+        );
 
         JSONArray savedVersions = new JSONArray();
         List<SavedVersionStore.SavedVersion> versions =

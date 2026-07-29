@@ -110,21 +110,21 @@ public final class MainActivity extends Activity {
             autoSettings.setOnClickListener(v -> showAutoSettingsDialog());
             root.addView(autoSettings);
 
-            Button useCurrentForAuto = button("將目前手勢設為自動捕捉");
+            Button useCurrentForAuto = button("套用目前手勢至全自動");
             useCurrentForAuto.setOnClickListener(v -> {
                 List<GestureLayer> current = GestureStore.load(this);
                 if (current.isEmpty()) {
                     toast("目前沒有可用的手勢");
                     return;
                 }
-                AutoSettings settings = AutoSettings.load(this);
-                settings.catchGestureSourceId =
-                        AutoSettings.CURRENT_GESTURE_SOURCE;
-                settings.save(this);
+                if (!AutoCatchGestureStore.saveSnapshot(this, current)) {
+                    toast("套用失敗，請重試");
+                    return;
+                }
                 refreshCatchGestureInfo();
                 toast(
-                        "已指定目前手勢：" + current.size() +
-                                " 條，識別碼 " +
+                        "已套用至全自動：" + current.size() +
+                                " 條，指紋 " +
                                 GestureIdentity.fingerprint(current)
                 );
             });
@@ -764,15 +764,33 @@ public final class MainActivity extends Activity {
         if (catchGestureInfo == null) {
             return;
         }
-        List<GestureLayer> selectedLayers = GestureStore.load(this);
+        List<GestureLayer> currentLayers = GestureStore.load(this);
+        List<GestureLayer> selectedLayers =
+                AutoCatchGestureStore.load(this);
+        String currentFingerprint =
+                GestureIdentity.fingerprint(currentLayers);
+        if (selectedLayers.isEmpty()) {
+            catchGestureInfo.setText(
+                    "全自動捕捉手勢：尚未套用\n" +
+                            "目前手勢：" + currentLayers.size() +
+                            " 條，指紋 " + currentFingerprint + "\n" +
+                            "請按上方「套用目前手勢至全自動」。"
+            );
+            return;
+        }
         long totalDuration = GestureIdentity.totalDuration(selectedLayers);
+        String selectedFingerprint =
+                GestureIdentity.fingerprint(selectedLayers);
         catchGestureInfo.setText(
-                "自動捕捉來源：本實驗版目前手勢（固定）\n" +
-                        "實際會播放 " + selectedLayers.size() +
-                        " 條軌跡，總長 " + formatSeconds(totalDuration) +
-                        " 秒，識別碼 " +
-                        GestureIdentity.fingerprint(selectedLayers) + "。\n" +
-                        "自動模式不再讀取任何保存版本；一般版與實驗版資料不共用。"
+                "全自動捕捉快照：" + selectedLayers.size() +
+                        " 條，總長 " + formatSeconds(totalDuration) +
+                        " 秒，指紋 " + selectedFingerprint + "\n" +
+                        "目前手勢指紋：" + currentFingerprint + "\n" +
+                        (
+                                currentFingerprint.equals(selectedFingerprint)
+                                        ? "兩者相同，可以啟動全自動。"
+                                        : "兩者不同；若要使用目前手勢，請重新按套用。"
+                        )
         );
     }
 

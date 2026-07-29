@@ -386,16 +386,19 @@ final class AutoPilotController {
             );
             return;
         }
-        List<GestureLayer> catchLayers = GestureStore.load(service);
+        List<GestureLayer> catchLayers =
+                AutoCatchGestureStore.load(service);
         if (catchLayers.isEmpty()) {
-            service.autoStatus("選定的捕捉手勢不存在，已停止自動辨識");
+            service.autoStatus(
+                    "尚未套用全自動捕捉手勢，請回主畫面按「套用目前手勢至全自動」"
+            );
             stop();
             return;
         }
         handler.removeCallbacksAndMessages(null);
         Log.i(
                 LOG_TAG,
-                "catch-dispatch source=current layers=" + catchLayers.size() +
+                "catch-dispatch source=snapshot layers=" + catchLayers.size() +
                         " fingerprint=" +
                         GestureIdentity.fingerprint(catchLayers)
         );

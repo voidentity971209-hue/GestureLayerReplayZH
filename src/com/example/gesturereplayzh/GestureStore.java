@@ -47,12 +47,6 @@ final class GestureStore {
                 .edit()
                 .putString(KEY_LAYERS, array.toString())
                 .apply();
-        if (context.getPackageName().endsWith(".autoexperimental")) {
-            AutoSettings settings = AutoSettings.load(context);
-            settings.catchGestureSourceId =
-                    AutoSettings.CURRENT_GESTURE_SOURCE;
-            settings.save(context);
-        }
     }
 
     static void append(Context context, GestureLayer layer) {
