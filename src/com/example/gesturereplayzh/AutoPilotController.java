@@ -20,6 +20,8 @@ final class AutoPilotController {
     private static final int MAX_OPEN_SCREEN_POLLS = 9;
     private static final int REQUIRED_ENCOUNTER_POLLS = 2;
     private static final int REQUIRED_UNKNOWN_POLLS = 9;
+    private static final int MAX_CATCH_RETRIES = 2;
+    private static final long CATCH_RETRY_DELAY_MS = 900L;
 
     private final GestureAccessibilityService service;
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -78,9 +80,9 @@ final class AutoPilotController {
             AutoSettings settings = AutoSettings.load(service);
             int width = bitmap.getWidth();
             int height = bitmap.getHeight();
-            recycle(bitmap);
             switch (state) {
                 case ENCOUNTER:
+                    recycle(bitmap);
                     service.autoStatus(settings.encounterDescription);
                     handler.postDelayed(
                             () -> playCatchGesture(token, 0),
@@ -88,6 +90,7 @@ final class AutoPilotController {
                     );
                     break;
                 case HAS_CLOSE_BUTTON:
+                    recycle(bitmap);
                     service.autoStatus(settings.exitDescription);
                     service.dispatchAutoTap(
                             width * settings.exitXRatio,
@@ -96,10 +99,11 @@ final class AutoPilotController {
                     );
                     break;
                 case MAP_RETURNED:
-                    scheduleMapScan(0L, token);
+                    beginMapScan(bitmap, token);
                     break;
                 case ROCKET_DIALOG:
                 default:
+                    recycle(bitmap);
                     if (unknownCount >= 8) {
                         service.autoStatus(settings.rocketDescription);
                         runRocketTap(token, 0);
@@ -117,14 +121,17 @@ final class AutoPilotController {
         });
     }
 
-    private void scheduleMapScan(long delayMs, int token) {
+    private void beginMapScan(Bitmap firstFrame, int token) {
         if (!isCurrent(token)) {
+            recycle(firstFrame);
             return;
         }
-        handler.postDelayed(() -> {
-            recycleMapFrames();
-            captureMapFrame(token);
-        }, delayMs);
+        recycleMapFrames();
+        mapFrames.add(firstFrame);
+        handler.postDelayed(
+                () -> captureMapFrame(token),
+                MAP_FRAME_GAP_MS
+        );
     }
 
     private void captureMapFrame(int token) {
@@ -321,12 +328,23 @@ final class AutoPilotController {
         if (!isCurrent(token)) {
             return;
         }
+        if (screenshotPending) {
+            handler.postDelayed(
+                    () -> playCatchGesture(token, retryCount),
+                    150L
+            );
+            return;
+        }
         List<GestureLayer> catchLayers = GestureStore.load(service);
         if (catchLayers.isEmpty()) {
             service.autoStatus("目前套用的手勢不存在，已停止自動辨識");
             stop();
             return;
         }
+        handler.removeCallbacksAndMessages(null);
+        recycleMapFrames();
+        mapBeforeTap = null;
+        lastTarget = null;
         service.playAutoGesture(
                 catchLayers,
                 new GestureAccessibilityService.AutoGestureCallback() {
@@ -351,11 +369,16 @@ final class AutoPilotController {
                         if (!isCurrent(token)) {
                             return;
                         }
-                        if (retryCount < 1) {
-                            service.autoStatus("捕捉手勢被取消，0.3 秒後重試");
+                        if (retryCount < MAX_CATCH_RETRIES) {
+                            service.autoStatus(
+                                    "捕捉手勢被取消，確認畫面後重試"
+                            );
                             handler.postDelayed(
-                                    () -> playCatchGesture(token, retryCount + 1),
-                                    300L
+                                    () -> confirmEncounterAndRetry(
+                                            token,
+                                            retryCount + 1
+                                    ),
+                                    CATCH_RETRY_DELAY_MS
                             );
                         } else {
                             service.autoStatus("捕捉手勢再次取消，繼續掃描");
@@ -367,6 +390,26 @@ final class AutoPilotController {
                     }
                 }
         );
+    }
+
+    private void confirmEncounterAndRetry(int token, int retryCount) {
+        if (!isCurrent(token)) {
+            return;
+        }
+        takeScreenshot(token, bitmap -> {
+            AutoScreenAnalyzer.ScreenState state =
+                    AutoScreenAnalyzer.classifyAfterTap(bitmap, null);
+            recycle(bitmap);
+            if (state == AutoScreenAnalyzer.ScreenState.ENCOUNTER) {
+                playCatchGesture(token, retryCount);
+            } else {
+                service.autoStatus("已離開捕捉畫面，不再重試手勢");
+                scheduleCycle(
+                        AutoSettings.load(service).scanIntervalMs,
+                        token
+                );
+            }
+        });
     }
 
     private void blockLastTarget() {

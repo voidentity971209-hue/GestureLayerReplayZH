@@ -381,8 +381,8 @@ final class AutoScreenAnalyzer {
             Bounds bounds
     ) {
         Shift best = new Shift(0, 0, Float.MAX_VALUE);
-        for (int dy = -12; dy <= 12; dy += 2) {
-            for (int dx = -12; dx <= 12; dx += 2) {
+        for (int dy = -8; dy <= 8; dy += 2) {
+            for (int dx = -8; dx <= 8; dx += 2) {
                 float error = shiftError(reference, other, bounds, dx, dy);
                 if (error < best.error) {
                     best = new Shift(dx, dy, error);

@@ -5,6 +5,7 @@ import android.content.SharedPreferences;
 
 final class AutoSettings {
     private static final String PREFS = "auto_operation_settings";
+    private static final String V7_TIMING_MIGRATED = "v7_timing_migrated";
 
     String scanDescription;
     String encounterDescription;
@@ -95,6 +96,19 @@ final class AutoSettings {
                 "autoEnabled",
                 settings.autoEnabled
         );
+        if (!values.getBoolean(V7_TIMING_MIGRATED, false)) {
+            if (settings.scanIntervalMs == 800L) {
+                settings.scanIntervalMs = 300L;
+            }
+            if (settings.beforeCatchMs == 300L) {
+                settings.beforeCatchMs = 700L;
+            }
+            values.edit()
+                    .putLong("scanIntervalMs", settings.scanIntervalMs)
+                    .putLong("beforeCatchMs", settings.beforeCatchMs)
+                    .putBoolean(V7_TIMING_MIGRATED, true)
+                    .apply();
+        }
         return settings;
     }
 
@@ -132,9 +146,9 @@ final class AutoSettings {
         settings.encounterDescription = "確認捕捉畫面後播放目前套用的捕捉手勢";
         settings.rocketDescription = "火箭隊對話點擊兩次，每次相隔 0.6 秒，再退出";
         settings.exitDescription = "非捕捉畫面等待後按下方 X 返回地圖";
-        settings.scanIntervalMs = 800L;
+        settings.scanIntervalMs = 300L;
         settings.rocketTapIntervalMs = 600L;
-        settings.beforeCatchMs = 300L;
+        settings.beforeCatchMs = 700L;
         settings.afterCatchMs = 6500L;
         settings.afterExitMs = 1000L;
         settings.rocketTapCount = 2;
