@@ -251,7 +251,7 @@ final class AutoScreenAnalyzer {
 
         int pokemonRequired = windowCount <= 1
                 ? 1
-                : Math.max(3, Math.round(windowCount * 0.55f));
+                : Math.max(2, Math.round(windowCount * 0.40f));
         int stopRequired = windowCount <= 1
                 ? 1
                 : Math.max(4, Math.round(windowCount * 0.70f));
@@ -350,8 +350,12 @@ final class AutoScreenAnalyzer {
             }
         }
 
+        // Join immediately-neighbouring animated fragments so classification
+        // sees one whole silhouette. Without this, a rotating fragment of a
+        // PokéStop or Gym can look like a Pokémon-sized independent object.
+        boolean[] joinedMotion = dilate(rawMotion, columns, rows, 1);
         List<Component> components = components(
-                rawMotion,
+                joinedMotion,
                 rawMotion,
                 differences,
                 columns,
@@ -417,8 +421,8 @@ final class AutoScreenAnalyzer {
                 continue;
             }
             float radius = structure.type == TargetType.GYM
-                    ? width * 0.20f
-                    : width * 0.13f;
+                    ? width * 0.12f
+                    : width * 0.07f;
             if (candidate.distanceSquared(structure) <= radius * radius) {
                 return true;
             }
@@ -468,10 +472,7 @@ final class AutoScreenAnalyzer {
         int objectWidth = right - left;
         int objectHeight = bottom - top;
         int area = objectWidth * objectHeight;
-        if (objectWidth < 8 || objectHeight < 8 ||
-                objectWidth > width * 0.23f ||
-                objectHeight > height * 0.15f ||
-                area > width * height * 0.022f) {
+        if (objectWidth < 8 || objectHeight < 8) {
             return null;
         }
 
@@ -500,35 +501,39 @@ final class AutoScreenAnalyzer {
                 Math.min(bounds.right, right + objectWidth),
                 Math.min(bounds.bottom, bottom + objectHeight)
         );
-        VisualStats structureContext = visualStats(
-                bitmap,
-                Math.max(
-                        bounds.left,
-                        left - Math.max(objectWidth * 3, width / 10)
-                ),
-                Math.max(bounds.top, top - objectHeight),
-                Math.min(
-                        bounds.right,
-                        right + Math.max(objectWidth * 3, width / 10)
-                ),
-                Math.min(
-                        bounds.bottom,
-                        bottom + Math.max(objectHeight * 8, height / 8)
-                )
+        int pedestalHalfWidth = Math.max(
+                Math.round(objectWidth * 0.75f),
+                width / 22
         );
-        int pedestalHalfWidth = Math.max(objectWidth, width / 14);
         RegionStats pedestal = stats(
                 bitmap,
                 Math.max(bounds.left, weightedX - pedestalHalfWidth) / width,
                 Math.max(bounds.top, bottom) / (float) height,
                 Math.min(bounds.right, weightedX + pedestalHalfWidth) / width,
-                Math.min(bounds.bottom, bottom + height * 0.16f) / height
+                Math.min(bounds.bottom, bottom + height * 0.08f) / height
+        );
+        RegionStats mountBand = stats(
+                bitmap,
+                Math.max(bounds.left, weightedX - width * 0.070f) / width,
+                Math.max(bounds.top, weightedY + height * 0.020f) / height,
+                Math.min(bounds.right, weightedX + width * 0.070f) / width,
+                Math.min(bounds.bottom, weightedY + height * 0.110f) / height
         );
         boolean mountedOnMapStructure =
-                pedestal.edgeRatio > 0.085f &&
+                (
+                        pedestal.edgeRatio > 0.090f &&
+                                (
+                                        pedestal.blueRatio > 0.30f ||
+                                                pedestal.whiteRatio > 0.035f
+                                )
+                ) ||
                         (
-                                pedestal.blueRatio > 0.28f ||
-                                        pedestal.whiteRatio > 0.055f
+                                mountBand.edgeRatio > 0.095f &&
+                                        (
+                                                mountBand.blueRatio > 0.45f ||
+                                                        mountBand.whiteRatio >
+                                                                0.025f
+                                        )
                         );
 
         float boxCells =
@@ -575,40 +580,51 @@ final class AutoScreenAnalyzer {
                         Math.min(1f, component.activeCells / 18f) * 0.10f -
                         centerDistance * 0.10f;
 
-        boolean blueStop =
-                local.cyanRatio > 0.22f &&
-                        local.cyanRatio > local.warmRatio * 1.65f &&
-                        objectWidth >= width * 0.025f &&
-                        objectWidth <= width * 0.18f &&
-                        objectHeight > height * 0.025f &&
-                        objectHeight <= height * 0.13f;
-        boolean gymLike =
-                (
-                        objectWidth > width * 0.12f ||
-                                objectHeight > height * 0.085f ||
-                                area > width * height * 0.008f
-                ) &&
-                        (
-                                surrounding.redWhiteRatio > 0.14f ||
-                                        local.cyanRatio > 0.18f
-                        );
         float aspectRatio = objectHeight / (float) Math.max(1, objectWidth);
+        boolean wholeLargeStructure =
+                objectWidth > width * 0.155f ||
+                        objectHeight > height * 0.105f ||
+                        area > width * height * 0.010f;
+        boolean fixedDiscShape =
+                objectWidth >= width * 0.015f &&
+                        objectWidth <= width * 0.19f &&
+                        objectHeight >= height * 0.008f &&
+                        objectHeight <= height * 0.13f &&
+                        aspectRatio >= 0.20f &&
+                        aspectRatio <= 4.50f &&
+                        compactness >= 0.10f;
+        boolean blueStop =
+                fixedDiscShape &&
+                        local.cyanRatio > 0.08f &&
+                        local.cyanRatio > local.warmRatio * 1.35f &&
+                        surrounding.cyanRatio > 0.075f;
+        boolean gymLike =
+                wholeLargeStructure ||
+                        (
+                                objectWidth > width * 0.105f &&
+                                        (
+                                                surrounding.redWhiteRatio >
+                                                        0.14f ||
+                                                        local.cyanRatio > 0.18f
+                                        )
+                        );
         boolean personLike =
                 objectHeight > height * 0.050f &&
                         aspectRatio > 2.15f;
         boolean pokemonLike =
-                confidence >= 0.30f &&
-                        local.edgeRatio >= 0.10f &&
-                        local.cyanRatio < 0.16f &&
-                        surrounding.cyanRatio < 0.20f &&
-                        structureContext.cyanRatio < 0.22f &&
+                !wholeLargeStructure &&
+                        confidence >= 0.30f &&
+                        local.edgeRatio >= 0.075f &&
+                        local.cyanRatio < 0.24f &&
+                        surrounding.cyanRatio < 0.30f &&
                         !mountedOnMapStructure &&
-                        compactness >= 0.18f &&
-                        component.activeCells >= 3 &&
-                        objectWidth >= width * 0.020f &&
-                        objectWidth <= width * 0.15f &&
-                        objectHeight >= height * 0.012f &&
-                        objectHeight <= height * 0.085f &&
+                        compactness >= 0.13f &&
+                        component.activeCells >= 2 &&
+                        objectWidth >= width * 0.015f &&
+                        objectWidth <= width * 0.155f &&
+                        objectHeight >= height * 0.009f &&
+                        objectHeight <= height * 0.105f &&
+                        !blueStop &&
                         !personLike;
         if (gymLike) {
             return new TargetCandidate(
@@ -737,6 +753,33 @@ final class AutoScreenAnalyzer {
         int below = safePixel(bitmap, x, y + step, center);
         return (colorDifference(center, right) +
                 colorDifference(center, below)) / 2;
+    }
+
+    private static boolean[] dilate(
+            boolean[] source,
+            int columns,
+            int rows,
+            int radius
+    ) {
+        boolean[] result = Arrays.copyOf(source, source.length);
+        for (int row = 0; row < rows; row++) {
+            for (int column = 0; column < columns; column++) {
+                int index = row * columns + column;
+                if (!source[index]) {
+                    continue;
+                }
+                for (int dy = -radius; dy <= radius; dy++) {
+                    for (int dx = -radius; dx <= radius; dx++) {
+                        int x = column + dx;
+                        int y = row + dy;
+                        if (x >= 0 && y >= 0 && x < columns && y < rows) {
+                            result[y * columns + x] = true;
+                        }
+                    }
+                }
+            }
+        }
+        return result;
     }
 
     private static List<Component> components(
@@ -1309,11 +1352,11 @@ final class AutoScreenAnalyzer {
         float weight;
 
         void include(int column, int row, boolean active, int difference) {
-            minColumn = Math.min(minColumn, column);
-            maxColumn = Math.max(maxColumn, column);
-            minRow = Math.min(minRow, row);
-            maxRow = Math.max(maxRow, row);
             if (active) {
+                minColumn = Math.min(minColumn, column);
+                maxColumn = Math.max(maxColumn, column);
+                minRow = Math.min(minRow, row);
+                maxRow = Math.max(maxRow, row);
                 activeCells++;
                 float cellWeight = Math.max(1f, difference);
                 weightedColumn += column * cellWeight;

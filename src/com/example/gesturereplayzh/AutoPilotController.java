@@ -38,8 +38,6 @@ final class AutoPilotController {
     private long lastScreenshotRequestAt;
     private AutoScreenAnalyzer.FrameSignature mapBeforeTap;
     private AutoScreenAnalyzer.TargetCandidate lastTarget;
-    private AutoScreenAnalyzer.TargetCandidate pendingTarget;
-    private int pendingTargetConfirmations;
 
     AutoPilotController(GestureAccessibilityService service) {
         this.service = service;
@@ -54,8 +52,6 @@ final class AutoPilotController {
         active = true;
         generation++;
         blockedTargets.clear();
-        pendingTarget = null;
-        pendingTargetConfirmations = 0;
         service.autoStatus("自動辨識已啟動：請保持最大視野、最高角度");
         scheduleCycle(500L, generation);
     }
@@ -69,8 +65,6 @@ final class AutoPilotController {
         recycleMapFrames();
         mapBeforeTap = null;
         lastTarget = null;
-        pendingTarget = null;
-        pendingTargetConfirmations = 0;
     }
 
     private void scheduleCycle(long delayMs, int token) {
@@ -218,42 +212,10 @@ final class AutoPilotController {
                 );
         Bitmap lastFrame = mapFrames.get(mapFrames.size() - 1);
         if (target == null) {
-            pendingTarget = null;
-            pendingTargetConfirmations = 0;
             recycleMapFrames();
             scheduleCycle(settings.scanIntervalMs, token);
             return;
         }
-
-        int frameWidth = lastFrame.getWidth();
-        if (!matchesPendingTarget(target, frameWidth)) {
-            pendingTarget = target;
-            pendingTargetConfirmations = 1;
-            recycleMapFrames();
-            service.autoStatus(
-                    "發現候選，等待第二次完整掃描確認：" +
-                            Math.round(target.point.x) + "," +
-                            Math.round(target.point.y)
-            );
-            scheduleCycle(150L, token);
-            return;
-        }
-        pendingTargetConfirmations++;
-        if (pendingTargetConfirmations < 2) {
-            recycleMapFrames();
-            scheduleCycle(150L, token);
-            return;
-        }
-        target = new AutoScreenAnalyzer.TargetCandidate(
-                target.type,
-                new PointF(
-                        (target.point.x + pendingTarget.point.x) * 0.50f,
-                        (target.point.y + pendingTarget.point.y) * 0.50f
-                ),
-                (target.confidence + pendingTarget.confidence) * 0.50f
-        );
-        pendingTarget = null;
-        pendingTargetConfirmations = 0;
 
         lastTarget = target;
         mapBeforeTap = AutoScreenAnalyzer.signature(lastFrame);
@@ -288,8 +250,6 @@ final class AutoPilotController {
         recycleMapFrames();
         mapBeforeTap = null;
         lastTarget = null;
-        pendingTarget = null;
-        pendingTargetConfirmations = 0;
         service.autoStatus("已確認不是駕駛，2 秒後重新掃描");
         scheduleCycle(POST_TAP_CLASSIFY_DELAY_MS, token);
     }
@@ -599,19 +559,6 @@ final class AutoPilotController {
             blockedTargets.remove(0);
         }
         lastTarget = null;
-    }
-
-    private boolean matchesPendingTarget(
-            AutoScreenAnalyzer.TargetCandidate target,
-            int frameWidth
-    ) {
-        if (pendingTarget == null || pendingTarget.type != target.type) {
-            return false;
-        }
-        float dx = pendingTarget.point.x - target.point.x;
-        float dy = pendingTarget.point.y - target.point.y;
-        float radius = frameWidth * 0.085f;
-        return dx * dx + dy * dy <= radius * radius;
     }
 
     private List<PointF> activeBlockedPoints() {
