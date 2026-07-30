@@ -6,6 +6,8 @@ import android.content.SharedPreferences;
 final class AutoSettings {
     private static final String PREFS = "auto_operation_settings";
     private static final String V7_TIMING_MIGRATED = "v7_timing_migrated";
+    private static final String V10_PHONE_PROFILE_MIGRATED =
+            "v10_phone_profile_migrated";
     static final String CURRENT_GESTURE_SOURCE = "current";
 
     String scanDescription;
@@ -115,6 +117,15 @@ final class AutoSettings {
                     .putBoolean(V7_TIMING_MIGRATED, true)
                     .apply();
         }
+        if (!values.getBoolean(V10_PHONE_PROFILE_MIGRATED, false)) {
+            if (settings.afterCatchMs == 6500L) {
+                settings.afterCatchMs = 1200L;
+            }
+            values.edit()
+                    .putLong("afterCatchMs", settings.afterCatchMs)
+                    .putBoolean(V10_PHONE_PROFILE_MIGRATED, true)
+                    .apply();
+        }
         return settings;
     }
 
@@ -161,7 +172,7 @@ final class AutoSettings {
         settings.scanIntervalMs = 300L;
         settings.rocketTapIntervalMs = 600L;
         settings.beforeCatchMs = 700L;
-        settings.afterCatchMs = 6500L;
+        settings.afterCatchMs = 1200L;
         settings.afterExitMs = 1000L;
         settings.rocketTapCount = 2;
         settings.rocketTapXRatio = 0.50f;

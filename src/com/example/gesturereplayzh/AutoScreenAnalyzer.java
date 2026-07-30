@@ -17,6 +17,7 @@ final class AutoScreenAnalyzer {
 
     enum ScreenState {
         ENCOUNTER,
+        ENCOUNTER_WAIT,
         HAS_CLOSE_BUTTON,
         MAP_RETURNED,
         ROCKET_DIALOG,
@@ -95,11 +96,17 @@ final class AutoScreenAnalyzer {
             Bitmap bitmap,
             FrameSignature mapBeforeTap
     ) {
-        if (looksLikeEncounter(bitmap)) {
-            return ScreenState.ENCOUNTER;
-        }
+        // A stable map has the small menu ball plus at least one map HUD
+        // anchor.  Check it before encounter controls: dense maps can contain
+        // white shapes in every encounter control region.
         if (looksLikeMapScreen(bitmap)) {
             return ScreenState.MAP_RETURNED;
+        }
+        if (looksLikeEncounterReady(bitmap)) {
+            return ScreenState.ENCOUNTER;
+        }
+        if (looksLikeEncounterContext(bitmap)) {
+            return ScreenState.ENCOUNTER_WAIT;
         }
         if (mapBeforeTap != null &&
                 mapBeforeTap.distance(new FrameSignature(bitmap)) < 0.105f &&
@@ -113,6 +120,97 @@ final class AutoScreenAnalyzer {
             return ScreenState.HAS_CLOSE_BUTTON;
         }
         return ScreenState.UNKNOWN;
+    }
+
+    static PointF findCloseButton(Bitmap bitmap) {
+        if (looksLikeEncounterContext(bitmap) ||
+                looksLikeCaptureAnimation(bitmap) ||
+                looksLikeMapScreenRelaxed(bitmap)) {
+            return null;
+        }
+        int width = bitmap.getWidth();
+        int height = bitmap.getHeight();
+        float bestScore = 0f;
+        float bestSymbolScore = 0f;
+        float bestY = 0f;
+        int bestRadius = 0;
+        int yStart = Math.round(height * 0.89f);
+        int yEnd = Math.round(height * 0.975f);
+        int yStep = Math.max(4, height / 150);
+        int radiusStart = Math.max(10, Math.round(width * 0.038f));
+        int radiusEnd = Math.max(radiusStart, Math.round(width * 0.082f));
+        int radiusStep = Math.max(3, width / 180);
+        for (int y = yStart; y <= yEnd; y += yStep) {
+            for (int radius = radiusStart;
+                 radius <= radiusEnd;
+                 radius += radiusStep) {
+                float score = circleBoundaryScore(
+                        bitmap,
+                        width * 0.50f,
+                        y,
+                        radius
+                );
+                float symbolScore = xInteriorScore(
+                        bitmap,
+                        width * 0.50f,
+                        y,
+                        radius
+                );
+                float combinedScore = score * 0.72f +
+                        symbolScore * 0.28f;
+                if (combinedScore > bestScore) {
+                    bestScore = combinedScore;
+                    bestSymbolScore = symbolScore;
+                    bestY = y;
+                    bestRadius = radius;
+                }
+            }
+        }
+        if (bestScore < 0.29f || bestSymbolScore < 0.12f) {
+            return null;
+        }
+        float halfWidth = Math.max(
+                width * 0.08f,
+                bestRadius * 1.30f
+        ) / width;
+        float halfHeight = Math.max(
+                height * 0.035f,
+                bestRadius * 1.30f
+        ) / height;
+        RegionStats centerBottom = stats(
+                bitmap,
+                0.50f - halfWidth,
+                bestY / height - halfHeight,
+                0.50f + halfWidth,
+                bestY / height + halfHeight
+        );
+        // The permanent map menu button is a red/white ball in the same
+        // position.  A real close button is neutral/cyan and has a clear rim.
+        if (centerBottom.redRatio > 0.075f ||
+                centerBottom.edgeRatio < 0.060f ||
+                (
+                        centerBottom.whiteRatio < 0.018f &&
+                                centerBottom.blueRatio < 0.025f
+                )) {
+            return null;
+        }
+        RegionStats runControl =
+                stats(bitmap, 0.02f, 0.035f, 0.18f, 0.15f);
+        RegionStats cameraControl =
+                stats(bitmap, 0.38f, 0.035f, 0.62f, 0.15f);
+        RegionStats rightDock =
+                stats(bitmap, 0.77f, 0.82f, 0.97f, 0.98f);
+        boolean whiteMenu =
+                runControl.whiteRatio > 0.50f ||
+                        cameraControl.whiteRatio > 0.50f;
+        boolean visibleTopControls =
+                runControl.edgeRatio > 0.075f ||
+                        cameraControl.edgeRatio > 0.075f;
+        boolean pageDock = rightDock.whiteRatio > 0.080f;
+        if (!whiteMenu && !visibleTopControls && !pageDock) {
+            return null;
+        }
+        return new PointF(width * 0.50f, bestY);
     }
 
     static TargetCandidate findMapTarget(
@@ -598,53 +696,18 @@ final class AutoScreenAnalyzer {
         );
     }
 
-    private static boolean looksLikeEncounter(Bitmap bitmap) {
-        RegionStats ball = stats(bitmap, 0.27f, 0.79f, 0.73f, 0.995f);
-        RegionStats leftButton =
-                stats(bitmap, 0.03f, 0.82f, 0.23f, 0.98f);
-        RegionStats rightButton =
-                stats(bitmap, 0.77f, 0.82f, 0.97f, 0.98f);
-        RegionStats upperControls =
-                stats(bitmap, 0.03f, 0.04f, 0.65f, 0.20f);
+    private static boolean looksLikeEncounterReady(Bitmap bitmap) {
+        float circleScore = findEncounterBallCircleScore(bitmap);
 
-        boolean colorNeutralBall =
-                ball.whiteRatio > 0.050f &&
-                        ball.edgeRatio > 0.070f &&
-                        (
-                                ball.redRatio > 0.050f ||
-                                        ball.blueRatio > 0.080f ||
-                                        ball.darkRatio > 0.080f ||
-                                        ball.yellowRatio > 0.025f ||
-                                        ball.edgeRatio > 0.145f
-                        );
-        boolean symmetricCaptureButtons =
-                leftButton.whiteRatio > 0.030f &&
-                        rightButton.whiteRatio > 0.030f &&
-                        leftButton.edgeRatio > 0.035f &&
-                        rightButton.edgeRatio > 0.035f;
-        boolean captureUpperControls =
-                upperControls.whiteRatio > 0.003f &&
-                        upperControls.edgeRatio > 0.045f;
-
-        return !looksLikeMapScreen(bitmap) &&
-                colorNeutralBall &&
-                symmetricCaptureButtons &&
-                captureUpperControls;
+        // Ball colour is deliberately not fixed: normal, Great, Ultra and
+        // Master Balls all differ.  Readiness is the encounter HUD plus a
+        // large circular ball at the lower centre.
+        return looksLikeEncounterContext(bitmap) &&
+                circleScore >= 0.28f;
     }
 
     private static boolean looksLikeCloseButton(Bitmap bitmap) {
-        RegionStats centerBottom =
-                stats(bitmap, 0.43f, 0.885f, 0.57f, 0.995f);
-        if (looksPossiblyLikeEncounter(bitmap)) {
-            return false;
-        }
-        return centerBottom.edgeRatio > 0.105f &&
-                centerBottom.redRatio < 0.10f &&
-                (
-                        centerBottom.whiteRatio > 0.025f &&
-                                centerBottom.blueRatio > 0.022f ||
-                                centerBottom.blueRatio > 0.16f
-                );
+        return findCloseButton(bitmap) != null;
     }
 
     private static boolean looksLikeMapScreen(Bitmap bitmap) {
@@ -655,7 +718,7 @@ final class AutoScreenAnalyzer {
                 stats(bitmap, 0.00f, 0.76f, 0.31f, 0.995f);
         RegionStats rightActions =
                 stats(bitmap, 0.72f, 0.70f, 0.995f, 0.97f);
-        return looksLikeAvatarAnchor(avatar) &&
+        return looksLikeAvatarAnchor(avatar) ||
                 looksLikeRightMapAnchor(rightActions);
     }
 
@@ -678,17 +741,18 @@ final class AutoScreenAnalyzer {
                 stats(bitmap, 0.41f, 0.88f, 0.59f, 0.945f);
         RegionStats whiteBottom =
                 stats(bitmap, 0.41f, 0.925f, 0.59f, 0.995f);
-        return (
+        boolean redWhiteBall = (
                 wholeBall.redRatio > 0.055f &&
                         wholeBall.whiteRatio > 0.040f
                 ) || (
                 redTop.redRatio > 0.060f &&
                         whiteBottom.whiteRatio > 0.045f
                 );
+        return redWhiteBall && findMapMenuBallCircleScore(bitmap) >= 0.22f;
     }
 
     private static boolean looksLikeAvatarAnchor(RegionStats avatar) {
-        return avatar.edgeRatio > 0.140f &&
+        return avatar.edgeRatio > 0.105f &&
                 (
                         avatar.redRatio +
                                 avatar.blueRatio +
@@ -698,20 +762,216 @@ final class AutoScreenAnalyzer {
     }
 
     private static boolean looksLikeRightMapAnchor(RegionStats rightActions) {
-        return rightActions.edgeRatio > 0.110f &&
-                rightActions.whiteRatio > 0.070f;
+        return rightActions.edgeRatio > 0.085f &&
+                rightActions.whiteRatio > 0.045f;
     }
 
-    private static boolean looksPossiblyLikeEncounter(Bitmap bitmap) {
-        RegionStats ball = stats(bitmap, 0.27f, 0.79f, 0.73f, 0.995f);
+    private static boolean looksLikeEncounterContext(Bitmap bitmap) {
+        RegionStats runControl =
+                stats(bitmap, 0.02f, 0.035f, 0.18f, 0.15f);
+        RegionStats cameraControl =
+                stats(bitmap, 0.38f, 0.035f, 0.62f, 0.15f);
+        RegionStats cpPanel =
+                stats(bitmap, 0.16f, 0.24f, 0.84f, 0.44f);
         RegionStats leftButton =
                 stats(bitmap, 0.03f, 0.82f, 0.23f, 0.98f);
         RegionStats rightButton =
                 stats(bitmap, 0.77f, 0.82f, 0.97f, 0.98f);
-        return ball.whiteRatio > 0.035f &&
-                ball.edgeRatio > 0.055f &&
-                leftButton.whiteRatio > 0.020f &&
-                rightButton.whiteRatio > 0.020f;
+        boolean runAnchor =
+                runControl.whiteRatio > 0.009f &&
+                        runControl.edgeRatio > 0.038f;
+        boolean cameraAnchor =
+                cameraControl.whiteRatio > 0.006f &&
+                        cameraControl.edgeRatio > 0.035f;
+        boolean cpAnchor =
+                cpPanel.whiteRatio > 0.004f &&
+                        cpPanel.edgeRatio > 0.035f &&
+                        (
+                                cpPanel.darkRatio > 0.025f ||
+                                        cpPanel.edgeRatio > 0.075f
+                        );
+        boolean captureDocks =
+                leftButton.edgeRatio > 0.045f &&
+                        rightButton.edgeRatio > 0.045f &&
+                        (
+                                leftButton.darkRatio > 0.20f ||
+                                        leftButton.whiteRatio > 0.003f
+                        ) &&
+                        (
+                                rightButton.darkRatio > 0.20f ||
+                                        rightButton.whiteRatio > 0.003f
+                        );
+        // Bottom capture docks rule out PokéStop/Gym pages.  Requiring the CP
+        // band prevents roads and dense map objects from becoming encounters.
+        return runAnchor &&
+                cameraAnchor &&
+                cpAnchor &&
+                captureDocks &&
+                !looksLikeMapScreenRelaxed(bitmap);
+    }
+
+    private static boolean looksLikeCaptureAnimation(Bitmap bitmap) {
+        RegionStats leftButton =
+                stats(bitmap, 0.03f, 0.82f, 0.23f, 0.98f);
+        RegionStats rightButton =
+                stats(bitmap, 0.77f, 0.82f, 0.97f, 0.98f);
+        return leftButton.edgeRatio > 0.045f &&
+                rightButton.edgeRatio > 0.045f &&
+                findEncounterBallCircleScore(bitmap) >= 0.35f;
+    }
+
+    private static float findMapMenuBallCircleScore(Bitmap bitmap) {
+        int width = bitmap.getWidth();
+        int height = bitmap.getHeight();
+        float best = 0f;
+        int yStart = Math.round(height * 0.89f);
+        int yEnd = Math.round(height * 0.975f);
+        int yStep = Math.max(4, height / 150);
+        int radiusStart = Math.max(10, Math.round(width * 0.045f));
+        int radiusEnd = Math.max(radiusStart, Math.round(width * 0.090f));
+        int radiusStep = Math.max(3, width / 180);
+        for (int y = yStart; y <= yEnd; y += yStep) {
+            for (int radius = radiusStart;
+                 radius <= radiusEnd;
+                 radius += radiusStep) {
+                best = Math.max(
+                        best,
+                        circleBoundaryScore(
+                                bitmap,
+                                width * 0.50f,
+                                y,
+                                radius
+                        )
+                );
+            }
+        }
+        return best;
+    }
+
+    private static float findEncounterBallCircleScore(Bitmap bitmap) {
+        int width = bitmap.getWidth();
+        int height = bitmap.getHeight();
+        float best = 0f;
+        int yStart = Math.round(height * 0.82f);
+        int yEnd = Math.round(height * 0.975f);
+        int yStep = Math.max(5, height / 120);
+        int radiusStart = Math.max(12, Math.round(width * 0.105f));
+        int radiusEnd = Math.max(radiusStart, Math.round(width * 0.235f));
+        int radiusStep = Math.max(4, width / 100);
+        for (int y = yStart; y <= yEnd; y += yStep) {
+            for (int radius = radiusStart;
+                 radius <= radiusEnd;
+                 radius += radiusStep) {
+                best = Math.max(
+                        best,
+                        circleBoundaryScore(
+                                bitmap,
+                                width * 0.50f,
+                                y,
+                                radius
+                        )
+                );
+            }
+        }
+        return best;
+    }
+
+    private static float circleBoundaryScore(
+            Bitmap bitmap,
+            float centerX,
+            float centerY,
+            float radius
+    ) {
+        int valid = 0;
+        int strong = 0;
+        long totalDifference = 0L;
+        int samples = 36;
+        float inset = Math.max(2f, radius * 0.055f);
+        for (int index = 0; index < samples; index++) {
+            double angle = Math.PI * 2.0 * index / samples;
+            float cosine = (float) Math.cos(angle);
+            float sine = (float) Math.sin(angle);
+            int innerX = Math.round(centerX + (radius - inset) * cosine);
+            int innerY = Math.round(centerY + (radius - inset) * sine);
+            int outerX = Math.round(centerX + (radius + inset) * cosine);
+            int outerY = Math.round(centerY + (radius + inset) * sine);
+            if (innerX < 0 || innerY < 0 ||
+                    outerX < 0 || outerY < 0 ||
+                    innerX >= bitmap.getWidth() ||
+                    outerX >= bitmap.getWidth() ||
+                    innerY >= bitmap.getHeight() ||
+                    outerY >= bitmap.getHeight()) {
+                continue;
+            }
+            int difference = colorDifference(
+                    bitmap.getPixel(innerX, innerY),
+                    bitmap.getPixel(outerX, outerY)
+            );
+            valid++;
+            totalDifference += difference;
+            if (difference >= 48) {
+                strong++;
+            }
+        }
+        if (valid < samples * 0.55f) {
+            return 0f;
+        }
+        float strongRatio = strong / (float) valid;
+        float averageDifference =
+                Math.min(1f, totalDifference / (float) (valid * 150));
+        return strongRatio * 0.72f + averageDifference * 0.28f;
+    }
+
+    private static float xInteriorScore(
+            Bitmap bitmap,
+            float centerX,
+            float centerY,
+            float radius
+    ) {
+        long difference = 0L;
+        int comparisons = 0;
+        for (float factor = 0.16f; factor <= 0.48f; factor += 0.08f) {
+            float diagonal = radius * factor;
+            float axial = diagonal * 1.4142f;
+            int[][] diagonalPoints = new int[][]{
+                    {Math.round(centerX + diagonal),
+                            Math.round(centerY + diagonal)},
+                    {Math.round(centerX - diagonal),
+                            Math.round(centerY - diagonal)},
+                    {Math.round(centerX + diagonal),
+                            Math.round(centerY - diagonal)},
+                    {Math.round(centerX - diagonal),
+                            Math.round(centerY + diagonal)}
+            };
+            int[][] axialPoints = new int[][]{
+                    {Math.round(centerX + axial), Math.round(centerY)},
+                    {Math.round(centerX - axial), Math.round(centerY)},
+                    {Math.round(centerX), Math.round(centerY + axial)},
+                    {Math.round(centerX), Math.round(centerY - axial)}
+            };
+            for (int index = 0; index < diagonalPoints.length; index++) {
+                int dx = diagonalPoints[index][0];
+                int dy = diagonalPoints[index][1];
+                int ax = axialPoints[index][0];
+                int ay = axialPoints[index][1];
+                if (dx < 0 || dy < 0 || ax < 0 || ay < 0 ||
+                        dx >= bitmap.getWidth() ||
+                        ax >= bitmap.getWidth() ||
+                        dy >= bitmap.getHeight() ||
+                        ay >= bitmap.getHeight()) {
+                    continue;
+                }
+                difference += colorDifference(
+                        bitmap.getPixel(dx, dy),
+                        bitmap.getPixel(ax, ay)
+                );
+                comparisons++;
+            }
+        }
+        return Math.min(
+                1f,
+                difference / (float) Math.max(1, comparisons * 120)
+        );
     }
 
     private static boolean looksLikeRocketDialog(Bitmap bitmap) {

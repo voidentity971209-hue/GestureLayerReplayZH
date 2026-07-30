@@ -20,7 +20,7 @@ final class AutoPilotController {
     private static final long MIN_SCREENSHOT_INTERVAL_MS = 350L;
     private static final long POST_TAP_CLASSIFY_DELAY_MS = 650L;
     private static final long OPEN_SCREEN_POLL_MS = 250L;
-    private static final int MAX_OPEN_SCREEN_POLLS = 6;
+    private static final int MAX_OPEN_SCREEN_POLLS = 10;
     private static final int REQUIRED_ENCOUNTER_POLLS = 1;
     private static final int MAX_CATCH_RETRIES = 2;
     private static final long CATCH_RETRY_DELAY_MS = 900L;
@@ -103,6 +103,14 @@ final class AutoPilotController {
                             settings.beforeCatchMs
                     );
                     break;
+                case ENCOUNTER_WAIT:
+                    recycle(bitmap);
+                    service.autoStatus("捕捉畫面正在進場或結算，等待可投球狀態");
+                    handler.postDelayed(
+                            () -> inspectCurrentScreen(token, 0, 0),
+                            OPEN_SCREEN_POLL_MS
+                    );
+                    break;
                 case HAS_CLOSE_BUTTON:
                     if (closeCount < 1) {
                         recycle(bitmap);
@@ -116,11 +124,17 @@ final class AutoPilotController {
                         );
                         break;
                     }
+                    PointF currentClose =
+                            AutoScreenAnalyzer.findCloseButton(bitmap);
                     recycle(bitmap);
                     service.autoStatus(settings.exitDescription);
                     service.dispatchAutoTap(
-                            width * settings.exitXRatio,
-                            height * settings.exitYRatio,
+                            currentClose == null
+                                    ? width * settings.exitXRatio
+                                    : currentClose.x,
+                            currentClose == null
+                                    ? height * settings.exitYRatio
+                                    : currentClose.y,
                             () -> scheduleCycle(settings.afterExitMs, token)
                     );
                     break;
@@ -282,6 +296,17 @@ final class AutoPilotController {
                         );
                     }
                     break;
+                case ENCOUNTER_WAIT:
+                    recycle(bitmap);
+                    service.autoStatus("已進入捕捉流程，等待球與左右按鈕穩定");
+                    pollOpenedScreen(
+                            token,
+                            pollCount,
+                            0,
+                            0,
+                            0
+                    );
+                    break;
                 case MAP_RETURNED:
                     recycle(bitmap);
                     mapBeforeTap = null;
@@ -305,13 +330,19 @@ final class AutoPilotController {
                     }
                     int width = bitmap.getWidth();
                     int height = bitmap.getHeight();
+                    PointF openedClose =
+                            AutoScreenAnalyzer.findCloseButton(bitmap);
                     recycle(bitmap);
                     mapBeforeTap = null;
                     blockLastTarget();
                     service.autoStatus(settings.exitDescription);
                     service.dispatchAutoTap(
-                            width * settings.exitXRatio,
-                            height * settings.exitYRatio,
+                            openedClose == null
+                                    ? width * settings.exitXRatio
+                                    : openedClose.x,
+                            openedClose == null
+                                    ? height * settings.exitYRatio
+                                    : openedClose.y,
                             () -> scheduleCycle(settings.afterExitMs, token)
                     );
                     break;
@@ -378,11 +409,19 @@ final class AutoPilotController {
         AutoSettings settings = AutoSettings.load(service);
         PointF screen = screenSize();
         if (completedTaps >= settings.rocketTapCount) {
-            service.dispatchAutoTap(
-                    screen.x * settings.exitXRatio,
-                    screen.y * settings.exitYRatio,
-                    () -> scheduleCycle(settings.afterExitMs, token)
-            );
+            takeScreenshot(token, bitmap -> {
+                PointF close = AutoScreenAnalyzer.findCloseButton(bitmap);
+                recycle(bitmap);
+                service.dispatchAutoTap(
+                        close == null
+                                ? screen.x * settings.exitXRatio
+                                : close.x,
+                        close == null
+                                ? screen.y * settings.exitYRatio
+                                : close.y,
+                        () -> scheduleCycle(settings.afterExitMs, token)
+                );
+            });
             return;
         }
         service.dispatchAutoTap(
@@ -487,6 +526,12 @@ final class AutoPilotController {
             recycle(bitmap);
             if (state == AutoScreenAnalyzer.ScreenState.ENCOUNTER) {
                 playCatchGesture(token, retryCount);
+            } else if (state ==
+                    AutoScreenAnalyzer.ScreenState.ENCOUNTER_WAIT) {
+                handler.postDelayed(
+                        () -> confirmEncounterAndRetry(token, retryCount),
+                        OPEN_SCREEN_POLL_MS
+                );
             } else {
                 service.autoStatus("已離開捕捉畫面，不再重試手勢");
                 scheduleCycle(
