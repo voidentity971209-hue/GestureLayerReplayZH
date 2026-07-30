@@ -2,15 +2,16 @@
 <manifest
     xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.example.gesturereplayzh.autoexperimental"
-    android:versionCode="19"
-    android:versionName="0.13.0-experimental">
+    android:versionCode="22"
+    android:versionName="0.15.1-experimental">
 
     <uses-sdk android:minSdkVersion="30" android:targetSdkVersion="36" />
 
     <application
         android:allowBackup="true"
-        android:icon="@drawable/ic_launcher"
-        android:label="全自動辨識實驗版"
+        android:extractNativeLibs="true"
+        android:icon="@drawable/ic_launcher_master"
+        android:label="刷機"
         android:supportsRtl="true"
         android:theme="@style/Theme.GestureReplay">
 
@@ -19,6 +20,11 @@
             android:excludeFromRecents="true"
             android:exported="false"
             android:theme="@style/Theme.GestureReplay.Transparent" />
+
+        <activity
+            android:name="com.example.gesturereplayzh.ModelReviewActivity"
+            android:exported="false"
+            android:label="模型事件批改" />
 
         <activity
             android:name="com.example.gesturereplayzh.MainActivity"

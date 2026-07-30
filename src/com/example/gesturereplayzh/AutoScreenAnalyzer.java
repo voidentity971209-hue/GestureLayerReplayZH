@@ -3,6 +3,7 @@ package com.example.gesturereplayzh;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.PointF;
+import android.graphics.RectF;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -34,11 +35,31 @@ final class AutoScreenAnalyzer {
         final TargetType type;
         final PointF point;
         final float confidence;
+        final RectF modelRoiBox;
+        final String modelLabel;
 
         TargetCandidate(TargetType type, PointF point, float confidence) {
+            this(type, point, confidence, null, null);
+        }
+
+        TargetCandidate(
+                TargetType type,
+                PointF point,
+                float confidence,
+                RectF modelRoiBox,
+                String modelLabel
+        ) {
             this.type = type;
             this.point = point;
             this.confidence = confidence;
+            this.modelRoiBox = modelRoiBox == null
+                    ? null
+                    : new RectF(modelRoiBox);
+            this.modelLabel = modelLabel;
+        }
+
+        boolean fromModel() {
+            return modelRoiBox != null && modelLabel != null;
         }
     }
 

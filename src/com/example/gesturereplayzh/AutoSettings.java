@@ -9,6 +9,9 @@ final class AutoSettings {
     private static final String V10_PHONE_PROFILE_MIGRATED =
             "v10_phone_profile_migrated";
     static final String CURRENT_GESTURE_SOURCE = "current";
+    static final int DETECTOR_LEGACY = 0;
+    static final int DETECTOR_MODEL_PREVIEW = 1;
+    static final int DETECTOR_MODEL_VERIFY = 2;
 
     String scanDescription;
     String encounterDescription;
@@ -27,6 +30,13 @@ final class AutoSettings {
     String catchGestureSourceId;
     boolean autoEnabled;
     boolean pokemonOnlyMode;
+    int detectorMode;
+    float modelConfidenceThreshold;
+    int modelMaxResults;
+    int modelThreads;
+    boolean collectModelEvents;
+    int dataLimitMb;
+    int positiveSamplePercent;
 
     static AutoSettings load(Context context) {
         SharedPreferences values =
@@ -109,6 +119,61 @@ final class AutoSettings {
                 "pokemonOnlyMode",
                 settings.pokemonOnlyMode
         );
+        settings.detectorMode = Math.max(
+                DETECTOR_LEGACY,
+                Math.min(
+                        DETECTOR_MODEL_VERIFY,
+                        values.getInt("detectorMode", settings.detectorMode)
+                )
+        );
+        settings.modelConfidenceThreshold = Math.max(
+                0.05f,
+                Math.min(
+                        0.95f,
+                        values.getFloat(
+                                "modelConfidenceThreshold",
+                                settings.modelConfidenceThreshold
+                        )
+                )
+        );
+        settings.modelMaxResults = Math.max(
+                1,
+                Math.min(
+                        20,
+                        values.getInt(
+                                "modelMaxResults",
+                                settings.modelMaxResults
+                        )
+                )
+        );
+        settings.modelThreads = Math.max(
+                1,
+                Math.min(
+                        8,
+                        values.getInt("modelThreads", settings.modelThreads)
+                )
+        );
+        settings.collectModelEvents = values.getBoolean(
+                "collectModelEvents",
+                settings.collectModelEvents
+        );
+        settings.dataLimitMb = Math.max(
+                50,
+                Math.min(
+                        5000,
+                        values.getInt("dataLimitMb", settings.dataLimitMb)
+                )
+        );
+        settings.positiveSamplePercent = Math.max(
+                0,
+                Math.min(
+                        100,
+                        values.getInt(
+                                "positiveSamplePercent",
+                                settings.positiveSamplePercent
+                        )
+                )
+        );
         if (!values.getBoolean(V7_TIMING_MIGRATED, false)) {
             if (settings.scanIntervalMs == 800L) {
                 settings.scanIntervalMs = 300L;
@@ -159,6 +224,16 @@ final class AutoSettings {
                 )
                 .putBoolean("autoEnabled", autoEnabled)
                 .putBoolean("pokemonOnlyMode", pokemonOnlyMode)
+                .putInt("detectorMode", detectorMode)
+                .putFloat(
+                        "modelConfidenceThreshold",
+                        modelConfidenceThreshold
+                )
+                .putInt("modelMaxResults", modelMaxResults)
+                .putInt("modelThreads", modelThreads)
+                .putBoolean("collectModelEvents", collectModelEvents)
+                .putInt("dataLimitMb", dataLimitMb)
+                .putInt("positiveSamplePercent", positiveSamplePercent)
                 .apply();
     }
 
@@ -188,6 +263,13 @@ final class AutoSettings {
         settings.catchGestureSourceId = CURRENT_GESTURE_SOURCE;
         settings.autoEnabled = false;
         settings.pokemonOnlyMode = true;
+        settings.detectorMode = DETECTOR_LEGACY;
+        settings.modelConfidenceThreshold = 0.45f;
+        settings.modelMaxResults = 8;
+        settings.modelThreads = 4;
+        settings.collectModelEvents = true;
+        settings.dataLimitMb = 500;
+        settings.positiveSamplePercent = 20;
         return settings;
     }
 

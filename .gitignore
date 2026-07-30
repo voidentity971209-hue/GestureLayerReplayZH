@@ -9,7 +9,10 @@ release/
 *.apk
 *.idsig
 
+# Keep official AAR dependencies, not their temporary extracted copies.
+libs/*/
+libs/*.zip
+
 # Never publish signing material
 *.keystore
 *.jks
-

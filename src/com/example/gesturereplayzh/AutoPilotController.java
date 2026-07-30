@@ -4,6 +4,7 @@ import android.accessibilityservice.AccessibilityService;
 import android.graphics.Bitmap;
 import android.graphics.ColorSpace;
 import android.graphics.PointF;
+import android.graphics.RectF;
 import android.hardware.HardwareBuffer;
 import android.os.Handler;
 import android.os.Looper;
@@ -38,6 +39,9 @@ final class AutoPilotController {
     private long lastScreenshotRequestAt;
     private AutoScreenAnalyzer.FrameSignature mapBeforeTap;
     private AutoScreenAnalyzer.TargetCandidate lastTarget;
+    private TfliteObjectDetector modelDetector;
+    private String loadedModelToken = "none";
+    private String lastModelEventId;
 
     AutoPilotController(GestureAccessibilityService service) {
         this.service = service;
@@ -57,6 +61,7 @@ final class AutoPilotController {
     }
 
     void stop() {
+        ModelEventStore.discardIncomplete(service, lastModelEventId);
         active = false;
         generation++;
         screenshotPending = false;
@@ -65,6 +70,8 @@ final class AutoPilotController {
         recycleMapFrames();
         mapBeforeTap = null;
         lastTarget = null;
+        lastModelEventId = null;
+        closeModelDetector();
     }
 
     private void scheduleCycle(long delayMs, int token) {
@@ -204,21 +211,85 @@ final class AutoPilotController {
             return;
         }
         AutoSettings settings = AutoSettings.load(service);
-        AutoScreenAnalyzer.TargetCandidate target =
-                AutoScreenAnalyzer.findMapTarget(
-                        mapFrames,
-                        activeBlockedPoints(),
-                        settings.pokemonOnlyMode
-                );
         Bitmap lastFrame = mapFrames.get(mapFrames.size() - 1);
+        AutoScreenAnalyzer.TargetCandidate target;
+        if (settings.detectorMode == AutoSettings.DETECTOR_LEGACY) {
+            target = AutoScreenAnalyzer.findMapTarget(
+                    mapFrames,
+                    activeBlockedPoints(),
+                    settings.pokemonOnlyMode
+            );
+        } else {
+            target = findModelTarget(lastFrame, settings);
+            if (target == null &&
+                    !ModelManager.hasActive(service)) {
+                recycleMapFrames();
+                service.autoStatus(
+                        "尚未匯入 TFLite 模型；為避免亂點，模型模式暫停掃描"
+                );
+                scheduleCycle(1200L, token);
+                return;
+            }
+        }
         if (target == null) {
             recycleMapFrames();
             scheduleCycle(settings.scanIntervalMs, token);
             return;
         }
 
+        if (settings.detectorMode ==
+                AutoSettings.DETECTOR_MODEL_PREVIEW) {
+            recycleMapFrames();
+            service.autoStatus(
+                    "模型預覽：" + target.modelLabel +
+                            "，信任值 " +
+                            Math.round(target.confidence * 100f) +
+                            "%；預覽模式不點擊"
+            );
+            scheduleCycle(settings.scanIntervalMs, token);
+            return;
+        }
+
         lastTarget = target;
         mapBeforeTap = AutoScreenAnalyzer.signature(lastFrame);
+        if (settings.collectModelEvents) {
+            boolean modelTarget = target.fromModel();
+            String eventLabel = modelTarget
+                    ? target.modelLabel
+                    : target.type == AutoScreenAnalyzer.TargetType.POKEMON
+                    ? "pokemon"
+                    : "pokestop";
+            RectF eventBox = modelTarget
+                    ? target.modelRoiBox
+                    : TfliteObjectDetector.estimatedRoiBox(
+                            lastFrame.getWidth(),
+                            lastFrame.getHeight(),
+                            target.point.x,
+                            target.point.y,
+                            target.type ==
+                                    AutoScreenAnalyzer.TargetType.POKEMON
+                                    ? 0.13f : 0.18f,
+                            target.type ==
+                                    AutoScreenAnalyzer.TargetType.POKEMON
+                                    ? 0.17f : 0.22f
+                    );
+            TfliteObjectDetector.Detection eventDetection =
+                    new TfliteObjectDetector.Detection(
+                            eventLabel,
+                            0,
+                            target.confidence,
+                            eventBox,
+                            new RectF()
+                    );
+            lastModelEventId = ModelEventStore.begin(
+                    service,
+                    lastFrame,
+                    eventDetection,
+                    settings
+            );
+        } else {
+            lastModelEventId = null;
+        }
         recycleMapFrames();
         String targetName =
                 target.type == AutoScreenAnalyzer.TargetType.POKEMON
@@ -248,8 +319,10 @@ final class AutoPilotController {
         screenshotPending = false;
         handler.removeCallbacksAndMessages(null);
         recycleMapFrames();
+        ModelEventStore.discardIncomplete(service, lastModelEventId);
         mapBeforeTap = null;
         lastTarget = null;
+        lastModelEventId = null;
         service.autoStatus("已確認不是駕駛，2 秒後重新掃描");
         scheduleCycle(POST_TAP_CLASSIFY_DELAY_MS, token);
     }
@@ -278,9 +351,10 @@ final class AutoPilotController {
             AutoSettings settings = AutoSettings.load(service);
             switch (state) {
                 case ENCOUNTER:
-                    recycle(bitmap);
                     int nextEncounterCount = encounterCount + 1;
                     if (nextEncounterCount >= REQUIRED_ENCOUNTER_POLLS) {
+                        completeModelEvent(bitmap, "encounter", settings);
+                        recycle(bitmap);
                         mapBeforeTap = null;
                         lastTarget = null;
                         service.autoStatus(settings.encounterDescription);
@@ -289,6 +363,7 @@ final class AutoPilotController {
                                 settings.beforeCatchMs
                         );
                     } else {
+                        recycle(bitmap);
                         pollOpenedScreen(
                                 token,
                                 pollCount,
@@ -310,6 +385,7 @@ final class AutoPilotController {
                     );
                     break;
                 case MAP_RETURNED:
+                    completeModelEvent(bitmap, "map_unchanged", settings);
                     recycle(bitmap);
                     mapBeforeTap = null;
                     blockLastTarget();
@@ -334,6 +410,7 @@ final class AutoPilotController {
                     int height = bitmap.getHeight();
                     PointF openedClose =
                             AutoScreenAnalyzer.findCloseButton(bitmap);
+                    completeModelEvent(bitmap, "facility_or_close", settings);
                     recycle(bitmap);
                     mapBeforeTap = null;
                     blockLastTarget();
@@ -349,6 +426,7 @@ final class AutoPilotController {
                     );
                     break;
                 case ROCKET_DIALOG:
+                    completeModelEvent(bitmap, "rocket", settings);
                     recycle(bitmap);
                     mapBeforeTap = null;
                     blockLastTarget();
@@ -357,9 +435,10 @@ final class AutoPilotController {
                     break;
                 case UNKNOWN:
                 default:
-                    recycle(bitmap);
                     int nextUnknownCount = unknownCount + 1;
                     if (pollCount + 1 >= MAX_OPEN_SCREEN_POLLS) {
+                        completeModelEvent(bitmap, "unknown", settings);
+                        recycle(bitmap);
                         mapBeforeTap = null;
                         blockLastTarget();
                         service.autoStatus(
@@ -375,6 +454,7 @@ final class AutoPilotController {
                                 )
                         );
                     } else {
+                        recycle(bitmap);
                         pollOpenedScreen(
                                 token,
                                 pollCount,
@@ -567,6 +647,121 @@ final class AutoPilotController {
             blockedTargets.remove(0);
         }
         lastTarget = null;
+    }
+
+    private AutoScreenAnalyzer.TargetCandidate findModelTarget(
+            Bitmap frame,
+            AutoSettings settings
+    ) {
+        try {
+            String currentToken = ModelManager.versionToken(service);
+            if (!currentToken.equals(loadedModelToken)) {
+                closeModelDetector();
+                if (!ModelManager.hasActive(service)) {
+                    loadedModelToken = "none";
+                    return null;
+                }
+                modelDetector = new TfliteObjectDetector(
+                        ModelManager.activeFile(service),
+                        settings.modelThreads
+                );
+                loadedModelToken = currentToken;
+            }
+            if (modelDetector == null) {
+                return null;
+            }
+            List<TfliteObjectDetector.Detection> detections =
+                    modelDetector.detect(
+                            frame,
+                            settings.modelConfidenceThreshold,
+                            settings.modelMaxResults
+                    );
+            float playerX = frame.getWidth() * 0.50f;
+            float playerY = frame.getHeight() * 0.63f;
+            float radius = frame.getWidth() * 0.38f;
+            AutoScreenAnalyzer.TargetCandidate best = null;
+            float bestScore = -1f;
+            for (TfliteObjectDetector.Detection detection : detections) {
+                if (!"pokemon".equals(detection.label)) {
+                    continue;
+                }
+                float x = detection.screenBox.centerX();
+                float y = detection.screenBox.centerY();
+                float distance = (float) Math.hypot(
+                        x - playerX,
+                        y - playerY
+                );
+                if (distance > radius ||
+                        isBlocked(new PointF(x, y))) {
+                    continue;
+                }
+                float centerPreference =
+                        1f - Math.min(1f, distance / radius);
+                float combined = detection.score * 0.85f +
+                        centerPreference * 0.15f;
+                if (combined > bestScore) {
+                    bestScore = combined;
+                    best = new AutoScreenAnalyzer.TargetCandidate(
+                            AutoScreenAnalyzer.TargetType.POKEMON,
+                            new PointF(x, y),
+                            detection.score,
+                            detection.roiBox,
+                            detection.label
+                    );
+                }
+            }
+            return best;
+        } catch (Exception error) {
+            Log.e(LOG_TAG, "TFLite inference failed", error);
+            closeModelDetector();
+            service.autoStatus(
+                    "TFLite 模型推論失敗：" + error.getMessage()
+            );
+            return null;
+        }
+    }
+
+    private boolean isBlocked(PointF point) {
+        float radius = screenSize().x * 0.07f;
+        for (PointF blocked : activeBlockedPoints()) {
+            if (Math.hypot(
+                    point.x - blocked.x,
+                    point.y - blocked.y
+            ) <= radius) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void completeModelEvent(
+            Bitmap after,
+            String outcome,
+            AutoSettings settings
+    ) {
+        if (lastModelEventId == null) {
+            return;
+        }
+        ModelEventStore.complete(
+                service,
+                lastModelEventId,
+                after,
+                outcome,
+                settings
+        );
+        lastModelEventId = null;
+    }
+
+    private void closeModelDetector() {
+        if (modelDetector != null) {
+            try {
+                modelDetector.close();
+            } catch (Exception ignored) {
+                // Closing must not interrupt the controller.
+            }
+            modelDetector = null;
+        }
+        loadedModelToken = "none";
     }
 
     private List<PointF> activeBlockedPoints() {

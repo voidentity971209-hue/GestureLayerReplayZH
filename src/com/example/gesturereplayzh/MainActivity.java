@@ -15,6 +15,8 @@ import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.RadioButton;
+import android.widget.RadioGroup;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -32,12 +34,14 @@ import java.util.Locale;
 
 public final class MainActivity extends Activity {
     private static final int REQUEST_EXPORT_BACKUP = 1001;
+    private static final int REQUEST_IMPORT_MODEL = 1002;
 
     private final Handler handler = new Handler();
     private LinearLayout layerContainer;
     private LinearLayout versionContainer;
     private TextView serviceStatus;
     private TextView catchGestureInfo;
+    private TextView modelStatusInfo;
     private List<GestureLayer> layers;
     private List<SavedVersionStore.SavedVersion> versions;
     private Runnable pendingPlayback;
@@ -65,12 +69,20 @@ public final class MainActivity extends Activity {
         root.setPadding(dp(20), dp(24), dp(20), dp(36));
         scrollView.addView(root);
 
-        TextView title = text("分層手勢重播", 28f, Color.BLACK);
+        TextView title = text(
+                isExperimentalBuild()
+                        ? "大師球手勢實驗室"
+                        : "大師球手勢模擬器",
+                28f,
+                Color.BLACK
+        );
         title.setTypeface(null, android.graphics.Typeface.BOLD);
         root.addView(title);
 
         TextView subtitle = text(
-                "分開錄製每一條滑動，再疊加成同一個手勢播放。永久免費、免 Root、不含廣告。",
+                isExperimentalBuild()
+                        ? "手勢模擬、自動操作、模型與資料各自分區。永久免費、免 Root、不含廣告。"
+                        : "分開錄製每一條滑動，再疊加成同一個手勢播放。永久免費、免 Root、不含廣告。",
                 16f,
                 0xFF444444
         );
@@ -82,67 +94,10 @@ public final class MainActivity extends Activity {
         serviceStatus.setBackgroundColor(0xFFE8EAF6);
         root.addView(serviceStatus);
 
-        if (isExperimentalBuild()) {
-            TextView autoWarning = text(
-                    "全自動辨識實驗版\n" +
-                            "開始前請把遊戲地圖調成最大視野、最高角度，" +
-                            "並隱藏 PGSharp 功能按鈕。畫面判斷規則固定，" +
-                            "操作名稱、描述、時間、次數與點擊位置可自行修改。",
-                    15f,
-                    0xFF7A3E00
-            );
-            autoWarning.setPadding(dp(12), dp(12), dp(12), dp(12));
-            autoWarning.setBackgroundColor(0xFFFFF3E0);
-            root.addView(autoWarning);
-
-            CheckBox autoEnabled = new CheckBox(this);
-            autoEnabled.setText("我了解風險，允許啟動全自動實驗功能");
-            autoEnabled.setChecked(AutoSettings.load(this).autoEnabled);
-            autoEnabled.setOnCheckedChangeListener((buttonView, checked) -> {
-                AutoSettings settings = AutoSettings.load(this);
-                settings.autoEnabled = checked;
-                settings.save(this);
-                toast(checked ? "已允許全自動實驗功能" : "已停用全自動實驗功能");
-            });
-            root.addView(autoEnabled);
-
-            Button autoSettings = button("全自動操作設定");
-            autoSettings.setOnClickListener(v -> showAutoSettingsDialog());
-            root.addView(autoSettings);
-
-            Button useCurrentForAuto = button("套用目前手勢至全自動");
-            useCurrentForAuto.setOnClickListener(v -> {
-                List<GestureLayer> current = GestureStore.load(this);
-                if (current.isEmpty()) {
-                    toast("目前沒有可用的手勢");
-                    return;
-                }
-                if (!AutoCatchGestureStore.saveSnapshot(this, current)) {
-                    toast("套用失敗，請重試");
-                    return;
-                }
-                refreshCatchGestureInfo();
-                toast(
-                        "已套用至全自動：" + current.size() +
-                                " 條，指紋 " +
-                                GestureIdentity.fingerprint(current)
-                );
-            });
-            root.addView(useCurrentForAuto);
-
-            catchGestureInfo = text(
-                    "",
-                    14f,
-                    0xFF455A64
-            );
-            catchGestureInfo.setPadding(dp(12), dp(8), dp(12), dp(8));
-            root.addView(catchGestureInfo);
-        }
-
-        Button accessibility = button("開啟無障礙服務設定");
-        accessibility.setOnClickListener(v ->
-                startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
-        root.addView(accessibility);
+        root.addView(sectionTitle(
+                "① 手勢模擬與編輯",
+                "錄製、疊加、排序與播放手勢。這一區不會判斷畫面內容。"
+        ));
 
         Button record = button("＋ 錄製新軌跡");
         record.setOnClickListener(v ->
@@ -195,10 +150,6 @@ public final class MainActivity extends Activity {
         saveVersion.setOnClickListener(v -> saveCurrentVersion());
         root.addView(saveVersion);
 
-        Button exportBackup = button("匯出手勢備份（傳送給開發者）");
-        exportBackup.setOnClickListener(v -> chooseBackupDestination());
-        root.addView(exportBackup);
-
         versionContainer = new LinearLayout(this);
         versionContainer.setOrientation(LinearLayout.VERTICAL);
         root.addView(versionContainer);
@@ -223,6 +174,89 @@ public final class MainActivity extends Activity {
         warning.setPadding(dp(12), dp(16), dp(12), 0);
         root.addView(warning);
 
+        if (isExperimentalBuild()) {
+            root.addView(sectionTitle(
+                    "② 全自動操作",
+                    "控制何時掃描、捕捉、退出及重試。畫面判斷方法固定，時間與操作座標可修改。"
+            ));
+
+            TextView autoWarning = infoBox(
+                    "開始前請把遊戲地圖調成最大視野、最高角度，" +
+                            "並隱藏第三方功能按鈕。這是實驗功能，" +
+                            "可能誤判，也可能被遊戲服務視為自動化操作。",
+                    0xFFFFF3E0,
+                    0xFF7A3E00
+            );
+            root.addView(autoWarning);
+
+            CheckBox autoEnabled = new CheckBox(this);
+            autoEnabled.setText("我了解風險，允許啟動全自動實驗功能");
+            autoEnabled.setChecked(AutoSettings.load(this).autoEnabled);
+            autoEnabled.setOnCheckedChangeListener((buttonView, checked) -> {
+                AutoSettings settings = AutoSettings.load(this);
+                settings.autoEnabled = checked;
+                settings.save(this);
+                toast(checked ? "已允許全自動實驗功能" : "已停用全自動實驗功能");
+            });
+            root.addView(autoEnabled);
+
+            Button autoSettings = button("調整全自動操作設定");
+            autoSettings.setOnClickListener(v -> showAutoSettingsDialog());
+            root.addView(autoSettings);
+
+            Button useCurrentForAuto = button("套用目前手勢至全自動捕捉");
+            useCurrentForAuto.setOnClickListener(v -> {
+                List<GestureLayer> current = GestureStore.load(this);
+                if (current.isEmpty()) {
+                    toast("目前沒有可用的手勢");
+                    return;
+                }
+                if (!AutoCatchGestureStore.saveSnapshot(this, current)) {
+                    toast("套用失敗，請重試");
+                    return;
+                }
+                refreshCatchGestureInfo();
+                toast(
+                        "已套用至全自動：" + current.size() +
+                                " 條，指紋 " +
+                                GestureIdentity.fingerprint(current)
+                );
+            });
+            root.addView(useCurrentForAuto);
+
+            catchGestureInfo = text("", 14f, 0xFF455A64);
+            catchGestureInfo.setPadding(dp(12), dp(8), dp(12), dp(8));
+            root.addView(catchGestureInfo);
+
+            root.addView(sectionTitle(
+                    "③ 模型與錯誤資料",
+                    "匯入、回復 TFLite 模型，實際點擊驗證結果，並在手機上批改與匯出訓練資料。"
+            ));
+            modelStatusInfo = infoBox(
+                    "",
+                    0xFFEDE7F6,
+                    0xFF4527A0
+            );
+            root.addView(modelStatusInfo);
+            Button modelCenter = button("開啟模型、信任值與資料中心");
+            modelCenter.setOnClickListener(v -> showModelCenterDialog());
+            root.addView(modelCenter);
+        }
+
+        root.addView(sectionTitle(
+                isExperimentalBuild() ? "④ 權限與備份" : "② 權限與備份",
+                "管理無障礙服務並匯出手勢資料。更新 App 不會主動清除已保存手勢。"
+        ));
+
+        Button accessibility = button("開啟無障礙服務設定");
+        accessibility.setOnClickListener(v ->
+                startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
+        root.addView(accessibility);
+
+        Button exportBackup = button("匯出手勢備份（JSON）");
+        exportBackup.setOnClickListener(v -> chooseBackupDestination());
+        root.addView(exportBackup);
+
         setContentView(scrollView);
     }
 
@@ -237,13 +271,16 @@ public final class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode != REQUEST_EXPORT_BACKUP ||
-                resultCode != RESULT_OK ||
+        if (resultCode != RESULT_OK ||
                 data == null ||
                 data.getData() == null) {
             return;
         }
-        writeBackup(data.getData());
+        if (requestCode == REQUEST_EXPORT_BACKUP) {
+            writeBackup(data.getData());
+        } else if (requestCode == REQUEST_IMPORT_MODEL) {
+            importModel(data.getData());
+        }
     }
 
     private void chooseBackupDestination() {
@@ -293,6 +330,7 @@ public final class MainActivity extends Activity {
         }
         refreshVersions();
         refreshCatchGestureInfo();
+        refreshModelStatus();
     }
 
     private void addLayerRow(int index, GestureLayer layer) {
@@ -613,6 +651,10 @@ public final class MainActivity extends Activity {
                 "掃描步驟名稱／描述",
                 settings.scanDescription
         );
+        addFieldHelp(
+                fields,
+                "只改變介面顯示名稱，不會改變畫面判斷方法。"
+        );
         EditText encounterDescription = addTextField(
                 fields,
                 "捕捉步驟名稱／描述",
@@ -633,36 +675,62 @@ public final class MainActivity extends Activity {
                 "掃描間隔（秒，0.1 為單位）",
                 settings.scanIntervalMs / 1000f
         );
+        addFieldHelp(
+                fields,
+                "兩輪地圖掃描之間等待多久。數值越小反應越快，" +
+                        "但耗電、發熱與畫面尚未穩定就誤判的機率也會增加。"
+        );
         CheckBox pokemonOnlyMode = new CheckBox(this);
         pokemonOnlyMode.setText(
                 "只抓寶可夢測試模式（不點補給站，建議保持開啟）"
         );
         pokemonOnlyMode.setChecked(settings.pokemonOnlyMode);
         fields.addView(pokemonOnlyMode);
+        addFieldHelp(
+                fields,
+                "開啟後不使用補給站作為備援目標，適合測試寶可夢辨識。"
+        );
         EditText rocketInterval = addNumberField(
                 fields,
                 "火箭隊每次對話點擊間隔（秒）",
                 settings.rocketTapIntervalMs / 1000f
+        );
+        addFieldHelp(
+                fields,
+                "每次推進火箭隊對話之間的等待時間。太短可能漏掉尚未出現的對話。"
         );
         EditText rocketCount = addIntegerField(
                 fields,
                 "火箭隊對話點擊次數",
                 settings.rocketTapCount
         );
+        addFieldHelp(fields, "進入火箭隊畫面後，先點擊對話區幾次再尋找 X。");
         EditText beforeCatch = addNumberField(
                 fields,
                 "確認捕捉畫面後等待（秒）",
                 settings.beforeCatchMs / 1000f
+        );
+        addFieldHelp(
+                fields,
+                "確認捕捉介面成立後，等待畫面與球穩定再播放捕捉手勢。"
         );
         EditText afterCatch = addNumberField(
                 fields,
                 "播放捕捉手勢後等待（秒）",
                 settings.afterCatchMs / 1000f
         );
+        addFieldHelp(
+                fields,
+                "手勢送出後等待結果動畫的時間；之後程式才會重新判斷畫面。"
+        );
         EditText afterExit = addNumberField(
                 fields,
                 "按 X 後等待（秒）",
                 settings.afterExitMs / 1000f
+        );
+        addFieldHelp(
+                fields,
+                "退出補給站、道館或其他頁面後，等待地圖重新顯示的時間。"
         );
         EditText rocketX = addNumberField(
                 fields,
@@ -683,6 +751,11 @@ public final class MainActivity extends Activity {
                 fields,
                 "退出 Y 座標（螢幕百分比）",
                 settings.exitYRatio * 100f
+        );
+        addFieldHelp(
+                fields,
+                "座標使用螢幕百分比而非固定像素；X 從左到右，Y 從上到下。" +
+                        "只有無法偵測實際按鈕時才使用退出座標。"
         );
         TextView catchSourceNotice = text(
                 "捕捉手勢來源固定為本實驗版主畫面的「目前手勢」，" +
@@ -767,6 +840,278 @@ public final class MainActivity extends Activity {
         }
     }
 
+    private void showModelCenterDialog() {
+        AutoSettings settings = AutoSettings.load(this);
+        ScrollView scroll = new ScrollView(this);
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(22), dp(10), dp(22), dp(18));
+        scroll.addView(content);
+
+        content.addView(infoBox(
+                ModelManager.describe(this) + "\n" +
+                        "待批改事件：" +
+                        ModelEventStore.pendingCount(this) +
+                        "　已用空間：" +
+                        String.format(
+                                Locale.TAIWAN,
+                                "%.1f MB",
+                                ModelEventStore.storageBytes(this) /
+                                        1024f / 1024f
+                        ),
+                0xFFE8EAF6,
+                0xFF283593
+        ));
+
+        TextView modeTitle = text("地圖候選辨識模式", 17f, Color.BLACK);
+        modeTitle.setTypeface(null, android.graphics.Typeface.BOLD);
+        modeTitle.setPadding(0, dp(16), 0, 0);
+        content.addView(modeTitle);
+        RadioGroup detectorMode = new RadioGroup(this);
+        RadioButton legacy = radio(
+                "既有規則：可實際點擊並冷啟動收集第一批資料",
+                AutoSettings.DETECTOR_LEGACY
+        );
+        RadioButton preview = radio(
+                "模型預覽：執行 TFLite，但不點擊、不判斷結果",
+                AutoSettings.DETECTOR_MODEL_PREVIEW
+        );
+        RadioButton verify = radio(
+                "模型驗證收集：實際點擊，再保存成功或誤判",
+                AutoSettings.DETECTOR_MODEL_VERIFY
+        );
+        detectorMode.addView(legacy);
+        detectorMode.addView(preview);
+        detectorMode.addView(verify);
+        detectorMode.check(10_000 + settings.detectorMode);
+        content.addView(detectorMode);
+        addFieldHelp(
+                content,
+                "你說得正確：只有實際點擊後，才能根據是否進入捕捉、" +
+                        "設施或仍留在地圖，建立候選結果。沒有模型時先用既有規則收集；" +
+                        "純預覽只適合確認模型會框哪裡。"
+        );
+
+        EditText confidence = addNumberField(
+                content,
+                "最低信任值（百分比）",
+                settings.modelConfidenceThreshold * 100f
+        );
+        addFieldHelp(
+                content,
+                "模型對每個候選輸出 0～100% 的相對分數，但不是保證正確的機率。" +
+                        "門檻低會找到更多目標但誤點較多；門檻高會減少誤點但容易漏怪。" +
+                        "第一版建議從 45% 開始，再依批改結果調整。"
+        );
+        EditText maxResults = addIntegerField(
+                content,
+                "每次最多保留候選數量",
+                settings.modelMaxResults
+        );
+        addFieldHelp(
+                content,
+                "模型一次可能找到多個物件。程式只會從其中的 pokemon 類別，" +
+                        "選擇信任值與玩家距離綜合分數最高的一個。"
+        );
+        EditText threads = addIntegerField(
+                content,
+                "模型 CPU 執行緒（1～8）",
+                settings.modelThreads
+        );
+        addFieldHelp(
+                content,
+                "執行緒越多通常越快，但更耗電、容易發熱。一般先用 4。"
+        );
+
+        CheckBox collectEvents = new CheckBox(this);
+        collectEvents.setText("保存規則／模型實際點擊後的驗證事件");
+        collectEvents.setChecked(settings.collectModelEvents);
+        content.addView(collectEvents);
+        addFieldHelp(
+                content,
+                "保存固定 ROI、模型框、信任值與點擊後畫面。" +
+                        "自動結果只是候選標籤，必須由你批改後才能匯出訓練。"
+        );
+        EditText dataLimit = addIntegerField(
+                content,
+                "資料容量上限（MB）",
+                settings.dataLimitMb
+        );
+        addFieldHelp(
+                content,
+                "達到上限後停止新增事件，不會自動刪除尚未批改的資料。"
+        );
+        EditText positivePercent = addIntegerField(
+                content,
+                "成功捕捉事件保留比例（0～100%）",
+                settings.positiveSamplePercent
+        );
+        addFieldHelp(
+                content,
+                "誤判全部保留；成功案例只抽樣保存，避免大量相似正確圖片" +
+                        "壓過真正需要修正的錯誤。建議 20%。"
+        );
+
+        Button importModel = button("匯入並驗證 .tflite 模型");
+        importModel.setOnClickListener(v -> chooseModel());
+        content.addView(importModel);
+        Button restore = button("回復上一版模型");
+        restore.setEnabled(ModelManager.hasPrevious(this));
+        restore.setOnClickListener(v -> {
+            try {
+                if (ModelManager.restorePrevious(this)) {
+                    toast("已交換為上一版模型");
+                    refreshModelStatus();
+                }
+            } catch (Exception error) {
+                toast("回復失敗：" + error.getMessage());
+            }
+        });
+        content.addView(restore);
+        Button review = button(
+                "批改事件（" + ModelEventStore.pendingCount(this) + "）"
+        );
+        review.setOnClickListener(v ->
+                startActivity(new Intent(this, ModelReviewActivity.class)));
+        content.addView(review);
+        Button remove = button("停用並刪除目前模型");
+        remove.setEnabled(ModelManager.hasActive(this));
+        remove.setOnClickListener(v -> new AlertDialog.Builder(this)
+                .setMessage("刪除目前模型？上一版模型仍會保留。")
+                .setNegativeButton("取消", null)
+                .setPositiveButton("刪除", (dialog, which) -> {
+                    ModelManager.removeActive(this);
+                    AutoSettings updated = AutoSettings.load(this);
+                    updated.detectorMode = AutoSettings.DETECTOR_LEGACY;
+                    updated.save(this);
+                    refreshModelStatus();
+                    toast("目前模型已刪除，已切回既有規則");
+                })
+                .show());
+        content.addView(remove);
+
+        LinearLayout actions = new LinearLayout(this);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        Button cancel = compactButton("取消");
+        Button save = compactButton("保存設定");
+        actions.addView(cancel);
+        actions.addView(save);
+        content.addView(actions);
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("模型與錯誤資料中心")
+                .setView(scroll)
+                .create();
+        cancel.setOnClickListener(v -> dialog.dismiss());
+        save.setOnClickListener(v -> {
+            int selected =
+                    detectorMode.getCheckedRadioButtonId() - 10_000;
+            if (selected != AutoSettings.DETECTOR_LEGACY &&
+                    !ModelManager.hasActive(this)) {
+                toast("請先匯入相容的 TFLite 模型");
+                return;
+            }
+            settings.detectorMode = selected;
+            settings.modelConfidenceThreshold = Math.max(
+                    0.05f,
+                    Math.min(
+                            0.95f,
+                            numberValue(
+                                    confidence,
+                                    settings.modelConfidenceThreshold * 100f
+                            ) / 100f
+                    )
+            );
+            settings.modelMaxResults = integerValue(
+                    maxResults,
+                    settings.modelMaxResults,
+                    1,
+                    20
+            );
+            settings.modelThreads = integerValue(
+                    threads,
+                    settings.modelThreads,
+                    1,
+                    8
+            );
+            settings.collectModelEvents = collectEvents.isChecked();
+            settings.dataLimitMb = integerValue(
+                    dataLimit,
+                    settings.dataLimitMb,
+                    50,
+                    5000
+            );
+            settings.positiveSamplePercent = integerValue(
+                    positivePercent,
+                    settings.positiveSamplePercent,
+                    0,
+                    100
+            );
+            settings.save(this);
+            dialog.dismiss();
+            refreshModelStatus();
+            toast("模型與資料設定已保存");
+        });
+        dialog.show();
+    }
+
+    private RadioButton radio(String value, int id) {
+        RadioButton button = new RadioButton(this);
+        button.setText(value);
+        button.setId(10_000 + id);
+        return button;
+    }
+
+    private void chooseModel() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*");
+        startActivityForResult(intent, REQUEST_IMPORT_MODEL);
+    }
+
+    private void importModel(Uri uri) {
+        try {
+            String summary = ModelManager.importModel(this, uri);
+            refreshModelStatus();
+            toast("模型已匯入：" + summary);
+        } catch (Exception error) {
+            toast(error.getMessage());
+        }
+    }
+
+    private void refreshModelStatus() {
+        if (modelStatusInfo == null) {
+            return;
+        }
+        AutoSettings settings = AutoSettings.load(this);
+        String mode;
+        switch (settings.detectorMode) {
+            case AutoSettings.DETECTOR_MODEL_PREVIEW:
+                mode = "模型預覽，不點擊";
+                break;
+            case AutoSettings.DETECTOR_MODEL_VERIFY:
+                mode = "模型驗證收集，會實際點擊";
+                break;
+            case AutoSettings.DETECTOR_LEGACY:
+            default:
+                mode = "既有手寫規則";
+                break;
+        }
+        modelStatusInfo.setText(
+                ModelManager.describe(this) +
+                        "\n目前模式：" + mode +
+                        "\n待批改：" +
+                        ModelEventStore.pendingCount(this) +
+                        "，資料 " +
+                        String.format(
+                                Locale.TAIWAN,
+                                "%.1f MB",
+                                ModelEventStore.storageBytes(this) /
+                                        1024f / 1024f
+                        )
+        );
+    }
+
     private void refreshCatchGestureInfo() {
         if (catchGestureInfo == null) {
             return;
@@ -813,6 +1158,12 @@ public final class MainActivity extends Activity {
         input.setText(value);
         parent.addView(input);
         return input;
+    }
+
+    private void addFieldHelp(LinearLayout parent, String value) {
+        TextView help = text(value, 12f, 0xFF6D6D6D);
+        help.setPadding(0, 0, 0, dp(10));
+        parent.addView(help);
     }
 
     private EditText addNumberField(
@@ -879,6 +1230,14 @@ public final class MainActivity extends Activity {
         }
     }
 
+    private float numberValue(EditText input, float fallback) {
+        try {
+            return Float.parseFloat(input.getText().toString());
+        } catch (NumberFormatException ignored) {
+            return fallback;
+        }
+    }
+
     private float percentage(EditText input, float fallback) {
         try {
             float value = Float.parseFloat(input.getText().toString()) / 100f;
@@ -937,6 +1296,38 @@ public final class MainActivity extends Activity {
         view.setTextSize(size);
         view.setTextColor(color);
         view.setLineSpacing(0f, 1.15f);
+        return view;
+    }
+
+    private TextView sectionTitle(String title, String description) {
+        TextView view = text(
+                title + "\n" + description,
+                14f,
+                0xFF303F9F
+        );
+        view.setTextSize(14f);
+        view.setTypeface(null, android.graphics.Typeface.BOLD);
+        view.setPadding(dp(14), dp(12), dp(14), dp(12));
+        view.setBackgroundColor(0xFFE8EAF6);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+        );
+        params.setMargins(0, dp(24), 0, dp(8));
+        view.setLayoutParams(params);
+        return view;
+    }
+
+    private TextView infoBox(String value, int backgroundColor, int textColor) {
+        TextView view = text(value, 14f, textColor);
+        view.setPadding(dp(12), dp(12), dp(12), dp(12));
+        view.setBackgroundColor(backgroundColor);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+        );
+        params.setMargins(0, dp(4), 0, dp(8));
+        view.setLayoutParams(params);
         return view;
     }
 
