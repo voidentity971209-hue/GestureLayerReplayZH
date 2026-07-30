@@ -26,6 +26,7 @@ final class AutoSettings {
     float exitYRatio;
     String catchGestureSourceId;
     boolean autoEnabled;
+    boolean pokemonOnlyMode;
 
     static AutoSettings load(Context context) {
         SharedPreferences values =
@@ -104,6 +105,10 @@ final class AutoSettings {
                 "autoEnabled",
                 settings.autoEnabled
         );
+        settings.pokemonOnlyMode = values.getBoolean(
+                "pokemonOnlyMode",
+                settings.pokemonOnlyMode
+        );
         if (!values.getBoolean(V7_TIMING_MIGRATED, false)) {
             if (settings.scanIntervalMs == 800L) {
                 settings.scanIntervalMs = 300L;
@@ -153,6 +158,7 @@ final class AutoSettings {
                                 : catchGestureSourceId
                 )
                 .putBoolean("autoEnabled", autoEnabled)
+                .putBoolean("pokemonOnlyMode", pokemonOnlyMode)
                 .apply();
     }
 
@@ -165,7 +171,7 @@ final class AutoSettings {
 
     private static AutoSettings defaults() {
         AutoSettings settings = new AutoSettings();
-        settings.scanDescription = "掃描中央地圖，先處理寶可夢，再處理藍色補給站";
+        settings.scanDescription = "七幀一致性掃描：只點擊穩定的寶可夢候選";
         settings.encounterDescription = "確認捕捉畫面後播放目前套用的捕捉手勢";
         settings.rocketDescription = "火箭隊對話點擊兩次，每次相隔 0.6 秒，再退出";
         settings.exitDescription = "非捕捉畫面等待後按下方 X 返回地圖";
@@ -181,6 +187,7 @@ final class AutoSettings {
         settings.exitYRatio = 0.938f;
         settings.catchGestureSourceId = CURRENT_GESTURE_SOURCE;
         settings.autoEnabled = false;
+        settings.pokemonOnlyMode = true;
         return settings;
     }
 

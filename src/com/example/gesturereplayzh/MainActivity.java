@@ -633,6 +633,12 @@ public final class MainActivity extends Activity {
                 "掃描間隔（秒，0.1 為單位）",
                 settings.scanIntervalMs / 1000f
         );
+        CheckBox pokemonOnlyMode = new CheckBox(this);
+        pokemonOnlyMode.setText(
+                "只抓寶可夢測試模式（不點補給站，建議保持開啟）"
+        );
+        pokemonOnlyMode.setChecked(settings.pokemonOnlyMode);
+        fields.addView(pokemonOnlyMode);
         EditText rocketInterval = addNumberField(
                 fields,
                 "火箭隊每次對話點擊間隔（秒）",
@@ -722,6 +728,7 @@ public final class MainActivity extends Activity {
                     nonEmpty(exitDescription, settings.exitDescription);
             settings.scanIntervalMs =
                     seconds(scanInterval, settings.scanIntervalMs);
+            settings.pokemonOnlyMode = pokemonOnlyMode.isChecked();
             settings.rocketTapIntervalMs =
                     seconds(rocketInterval, settings.rocketTapIntervalMs);
             settings.beforeCatchMs =

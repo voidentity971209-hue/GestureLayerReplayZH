@@ -217,9 +217,76 @@ final class AutoScreenAnalyzer {
             List<Bitmap> frames,
             List<PointF> blockedPoints
     ) {
+        return findMapTarget(frames, blockedPoints, false);
+    }
+
+    static TargetCandidate findMapTarget(
+            List<Bitmap> frames,
+            List<PointF> blockedPoints,
+            boolean pokemonOnlyMode
+    ) {
         if (frames.size() < 3) {
             return null;
         }
+        int width = frames.get(frames.size() / 2).getWidth();
+        int height = frames.get(frames.size() / 2).getHeight();
+        int windowCount = frames.size() - 2;
+        List<CandidateCluster> clusters = new ArrayList<>();
+        for (int center = 1; center < frames.size() - 1; center++) {
+            List<Bitmap> window = Arrays.asList(
+                    frames.get(center - 1),
+                    frames.get(center),
+                    frames.get(center + 1)
+            );
+            List<TargetCandidate> candidates =
+                    findMapCandidatesInWindow(window, blockedPoints);
+            for (TargetCandidate candidate : candidates) {
+                addCandidateToCluster(
+                        clusters,
+                        candidate,
+                        width * 0.085f
+                );
+            }
+        }
+
+        int pokemonRequired = windowCount <= 1
+                ? 1
+                : Math.max(3, Math.round(windowCount * 0.55f));
+        int stopRequired = windowCount <= 1
+                ? 1
+                : Math.max(4, Math.round(windowCount * 0.70f));
+        CandidateCluster bestPokemon = null;
+        CandidateCluster bestStop = null;
+        for (CandidateCluster cluster : clusters) {
+            if (cluster.type == TargetType.POKEMON &&
+                    cluster.count >= pokemonRequired &&
+                    !nearStableStructure(cluster, clusters, width)) {
+                if (bestPokemon == null ||
+                        cluster.preferenceScore(width, height) >
+                                bestPokemon.preferenceScore(width, height)) {
+                    bestPokemon = cluster;
+                }
+            } else if (!pokemonOnlyMode &&
+                    cluster.type == TargetType.BLUE_STOP &&
+                    cluster.count >= stopRequired &&
+                    !nearGym(cluster, clusters, width)) {
+                if (bestStop == null ||
+                        cluster.preferenceScore(width, height) >
+                                bestStop.preferenceScore(width, height)) {
+                    bestStop = cluster;
+                }
+            }
+        }
+        CandidateCluster selected =
+                bestPokemon != null ? bestPokemon : bestStop;
+        return selected == null ? null : selected.asCandidate();
+    }
+
+    private static List<TargetCandidate> findMapCandidatesInWindow(
+            List<Bitmap> frames,
+            List<PointF> blockedPoints
+    ) {
+        List<TargetCandidate> result = new ArrayList<>();
         Bitmap first = frames.get(0);
         Bitmap middle = frames.get(frames.size() / 2);
         Bitmap last = frames.get(frames.size() - 1);
@@ -236,7 +303,7 @@ final class AutoScreenAnalyzer {
         Shift firstShift = estimateShift(middle, first, bounds);
         Shift lastShift = estimateShift(middle, last, bounds);
         if (firstShift.error > 0.185f || lastShift.error > 0.185f) {
-            return null;
+            return result;
         }
 
         int gridStep = Math.max(4, width / 145);
@@ -290,8 +357,6 @@ final class AutoScreenAnalyzer {
                 columns,
                 rows
         );
-        TargetCandidate bestPokemon = null;
-        TargetCandidate bestBlueStop = null;
         for (Component component : components) {
             TargetCandidate candidate = classifyComponent(
                     middle,
@@ -306,18 +371,75 @@ final class AutoScreenAnalyzer {
             if (candidate == null) {
                 continue;
             }
-            if (candidate.type == TargetType.POKEMON) {
-                if (bestPokemon == null ||
-                        candidate.confidence > bestPokemon.confidence) {
-                    bestPokemon = candidate;
-                }
-            } else if (candidate.type == TargetType.BLUE_STOP &&
-                    (bestBlueStop == null ||
-                            candidate.confidence > bestBlueStop.confidence)) {
-                bestBlueStop = candidate;
+            result.add(candidate);
+        }
+        return result;
+    }
+
+    private static void addCandidateToCluster(
+            List<CandidateCluster> clusters,
+            TargetCandidate candidate,
+            float radius
+    ) {
+        CandidateCluster nearest = null;
+        float nearestDistance = Float.MAX_VALUE;
+        for (CandidateCluster cluster : clusters) {
+            if (cluster.type != candidate.type) {
+                continue;
+            }
+            float dx = cluster.centerX() - candidate.point.x;
+            float dy = cluster.centerY() - candidate.point.y;
+            float distance = dx * dx + dy * dy;
+            if (distance <= radius * radius && distance < nearestDistance) {
+                nearest = cluster;
+                nearestDistance = distance;
             }
         }
-        return bestPokemon != null ? bestPokemon : bestBlueStop;
+        if (nearest == null) {
+            nearest = new CandidateCluster(candidate.type);
+            clusters.add(nearest);
+        }
+        nearest.add(candidate);
+    }
+
+    private static boolean nearStableStructure(
+            CandidateCluster candidate,
+            List<CandidateCluster> clusters,
+            int width
+    ) {
+        for (CandidateCluster structure : clusters) {
+            if (structure == candidate ||
+                    structure.count < 2 ||
+                    (
+                            structure.type != TargetType.GYM &&
+                                    structure.type != TargetType.BLUE_STOP
+                    )) {
+                continue;
+            }
+            float radius = structure.type == TargetType.GYM
+                    ? width * 0.20f
+                    : width * 0.13f;
+            if (candidate.distanceSquared(structure) <= radius * radius) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean nearGym(
+            CandidateCluster candidate,
+            List<CandidateCluster> clusters,
+            int width
+    ) {
+        for (CandidateCluster structure : clusters) {
+            if (structure.type == TargetType.GYM &&
+                    structure.count >= 2 &&
+                    candidate.distanceSquared(structure) <=
+                            width * width * 0.040f) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static TargetCandidate classifyComponent(
@@ -378,6 +500,36 @@ final class AutoScreenAnalyzer {
                 Math.min(bounds.right, right + objectWidth),
                 Math.min(bounds.bottom, bottom + objectHeight)
         );
+        VisualStats structureContext = visualStats(
+                bitmap,
+                Math.max(
+                        bounds.left,
+                        left - Math.max(objectWidth * 3, width / 10)
+                ),
+                Math.max(bounds.top, top - objectHeight),
+                Math.min(
+                        bounds.right,
+                        right + Math.max(objectWidth * 3, width / 10)
+                ),
+                Math.min(
+                        bounds.bottom,
+                        bottom + Math.max(objectHeight * 8, height / 8)
+                )
+        );
+        int pedestalHalfWidth = Math.max(objectWidth, width / 14);
+        RegionStats pedestal = stats(
+                bitmap,
+                Math.max(bounds.left, weightedX - pedestalHalfWidth) / width,
+                Math.max(bounds.top, bottom) / (float) height,
+                Math.min(bounds.right, weightedX + pedestalHalfWidth) / width,
+                Math.min(bounds.bottom, bottom + height * 0.16f) / height
+        );
+        boolean mountedOnMapStructure =
+                pedestal.edgeRatio > 0.085f &&
+                        (
+                                pedestal.blueRatio > 0.28f ||
+                                        pedestal.whiteRatio > 0.055f
+                        );
 
         float boxCells =
                 (component.maxColumn - component.minColumn + 1f) *
@@ -447,6 +599,10 @@ final class AutoScreenAnalyzer {
         boolean pokemonLike =
                 confidence >= 0.30f &&
                         local.edgeRatio >= 0.10f &&
+                        local.cyanRatio < 0.16f &&
+                        surrounding.cyanRatio < 0.20f &&
+                        structureContext.cyanRatio < 0.22f &&
+                        !mountedOnMapStructure &&
                         compactness >= 0.18f &&
                         component.activeCells >= 3 &&
                         objectWidth >= width * 0.020f &&
@@ -1056,7 +1212,7 @@ final class AutoScreenAnalyzer {
             int width,
             List<PointF> blockedPoints
     ) {
-        float radius = width * 0.10f;
+        float radius = width * 0.18f;
         float radiusSquared = radius * radius;
         for (PointF point : blockedPoints) {
             float dx = x - point.x;
@@ -1169,6 +1325,60 @@ final class AutoScreenAnalyzer {
 
         float averageDifference() {
             return differenceTotal / (float) Math.max(1, activeCells);
+        }
+    }
+
+    private static final class CandidateCluster {
+        final TargetType type;
+        int count;
+        float xTotal;
+        float yTotal;
+        float confidenceTotal;
+
+        CandidateCluster(TargetType type) {
+            this.type = type;
+        }
+
+        void add(TargetCandidate candidate) {
+            count++;
+            xTotal += candidate.point.x;
+            yTotal += candidate.point.y;
+            confidenceTotal += candidate.confidence;
+        }
+
+        float centerX() {
+            return xTotal / Math.max(1, count);
+        }
+
+        float centerY() {
+            return yTotal / Math.max(1, count);
+        }
+
+        float score() {
+            return confidenceTotal / Math.max(1, count) +
+                    Math.min(0.35f, count * 0.055f);
+        }
+
+        float preferenceScore(int width, int height) {
+            float dx = centerX() - width * PLAYER_CENTER_X_RATIO;
+            float dy = centerY() - height * PLAYER_CENTER_Y_RATIO;
+            float distance = (float) Math.sqrt(dx * dx + dy * dy) /
+                    Math.max(1f, width * POKEMON_RADIUS_BY_WIDTH);
+            return score() - Math.min(0.45f, distance * 0.30f);
+        }
+
+        float distanceSquared(CandidateCluster other) {
+            float dx = centerX() - other.centerX();
+            float dy = centerY() - other.centerY();
+            return dx * dx + dy * dy;
+        }
+
+        TargetCandidate asCandidate() {
+            return new TargetCandidate(
+                    type,
+                    new PointF(centerX(), centerY()),
+                    confidenceTotal / Math.max(1, count)
+            );
         }
     }
 
