@@ -239,7 +239,11 @@ final class AutoScreenAnalyzer {
                     frames.get(center + 1)
             );
             List<TargetCandidate> candidates =
-                    findMapCandidatesInWindow(window, blockedPoints);
+                    findMapCandidatesInWindow(
+                            window,
+                            blockedPoints,
+                            pokemonOnlyMode
+                    );
             for (TargetCandidate candidate : candidates) {
                 addCandidateToCluster(
                         clusters,
@@ -284,7 +288,8 @@ final class AutoScreenAnalyzer {
 
     private static List<TargetCandidate> findMapCandidatesInWindow(
             List<Bitmap> frames,
-            List<PointF> blockedPoints
+            List<PointF> blockedPoints,
+            boolean fastRecall
     ) {
         List<TargetCandidate> result = new ArrayList<>();
         Bitmap first = frames.get(0);
@@ -370,7 +375,8 @@ final class AutoScreenAnalyzer {
                     width,
                     height,
                     blockedPoints,
-                    threshold
+                    threshold,
+                    fastRecall
             );
             if (candidate == null) {
                 continue;
@@ -413,7 +419,6 @@ final class AutoScreenAnalyzer {
     ) {
         for (CandidateCluster structure : clusters) {
             if (structure == candidate ||
-                    structure.count < 2 ||
                     (
                             structure.type != TargetType.GYM &&
                                     structure.type != TargetType.BLUE_STOP
@@ -454,7 +459,8 @@ final class AutoScreenAnalyzer {
             int width,
             int height,
             List<PointF> blockedPoints,
-            int threshold
+            int threshold,
+            boolean fastRecall
     ) {
         if (component.activeCells < 2) {
             return null;
@@ -611,19 +617,30 @@ final class AutoScreenAnalyzer {
         boolean personLike =
                 objectHeight > height * 0.050f &&
                         aspectRatio > 2.15f;
-        boolean pokemonLike =
-                !wholeLargeStructure &&
-                        confidence >= 0.30f &&
+        boolean normalPokemon =
+                confidence >= 0.30f &&
                         local.edgeRatio >= 0.075f &&
                         local.cyanRatio < 0.24f &&
                         surrounding.cyanRatio < 0.30f &&
                         !mountedOnMapStructure &&
                         compactness >= 0.13f &&
+                        component.activeCells >= 2;
+        boolean fastPokemon =
+                confidence >= 0.22f &&
+                        local.edgeRatio >= 0.055f &&
+                        compactness >= 0.09f &&
                         component.activeCells >= 2 &&
-                        objectWidth >= width * 0.015f &&
-                        objectWidth <= width * 0.155f &&
-                        objectHeight >= height * 0.009f &&
-                        objectHeight <= height * 0.105f &&
+                        (
+                                !mountedOnMapStructure ||
+                                        confidence >= 0.42f
+                        );
+        boolean pokemonLike =
+                !wholeLargeStructure &&
+                        (fastRecall ? fastPokemon : normalPokemon) &&
+                        objectWidth >= width * 0.012f &&
+                        objectWidth <= width * 0.17f &&
+                        objectHeight >= height * 0.007f &&
+                        objectHeight <= height * 0.115f &&
                         !blueStop &&
                         !personLike;
         if (gymLike) {
@@ -1255,7 +1272,7 @@ final class AutoScreenAnalyzer {
             int width,
             List<PointF> blockedPoints
     ) {
-        float radius = width * 0.18f;
+        float radius = width * 0.07f;
         float radiusSquared = radius * radius;
         for (PointF point : blockedPoints) {
             float dx = x - point.x;

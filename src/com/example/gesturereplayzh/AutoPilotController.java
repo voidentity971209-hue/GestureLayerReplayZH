@@ -15,16 +15,16 @@ import java.util.List;
 
 final class AutoPilotController {
     private static final String LOG_TAG = "GestureReplayAuto";
-    private static final int MAP_FRAME_COUNT = 7;
-    private static final long MAP_FRAME_GAP_MS = 110L;
+    private static final int MAP_FRAME_COUNT = 3;
+    private static final long MAP_FRAME_GAP_MS = 100L;
     private static final long MIN_SCREENSHOT_INTERVAL_MS = 100L;
-    private static final long POST_TAP_CLASSIFY_DELAY_MS = 650L;
-    private static final long OPEN_SCREEN_POLL_MS = 250L;
-    private static final int MAX_OPEN_SCREEN_POLLS = 10;
+    private static final long POST_TAP_CLASSIFY_DELAY_MS = 450L;
+    private static final long OPEN_SCREEN_POLL_MS = 180L;
+    private static final int MAX_OPEN_SCREEN_POLLS = 5;
     private static final int REQUIRED_ENCOUNTER_POLLS = 1;
     private static final int MAX_CATCH_RETRIES = 2;
     private static final long CATCH_RETRY_DELAY_MS = 900L;
-    private static final long NON_ENCOUNTER_COOLDOWN_MS = 60_000L;
+    private static final long NON_ENCOUNTER_COOLDOWN_MS = 12_000L;
 
     private final GestureAccessibilityService service;
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -314,7 +314,7 @@ final class AutoPilotController {
                     mapBeforeTap = null;
                     blockLastTarget();
                     service.autoStatus(
-                            "未進入捕捉畫面，該區域暫停 1 分鐘並繼續掃描"
+                            "未進入捕捉畫面，該小區域暫停 12 秒並繼續快掃"
                     );
                     scheduleCycle(settings.scanIntervalMs, token);
                     break;
@@ -363,9 +363,17 @@ final class AutoPilotController {
                         mapBeforeTap = null;
                         blockLastTarget();
                         service.autoStatus(
-                                "點擊後未確認畫面，該區域暫停 1 分鐘"
+                                "未確認捕捉畫面，立即嘗試返回並繼續快掃"
                         );
-                        scheduleCycle(settings.scanIntervalMs, token);
+                        PointF size = screenSize();
+                        service.dispatchAutoTap(
+                                size.x * settings.exitXRatio,
+                                size.y * settings.exitYRatio,
+                                () -> scheduleCycle(
+                                        Math.min(300L, settings.afterExitMs),
+                                        token
+                                )
+                        );
                     } else {
                         pollOpenedScreen(
                                 token,
