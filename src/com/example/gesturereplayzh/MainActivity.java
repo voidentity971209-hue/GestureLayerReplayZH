@@ -872,25 +872,21 @@ public final class MainActivity extends Activity {
                 "既有規則：可實際點擊並冷啟動收集第一批資料",
                 AutoSettings.DETECTOR_LEGACY
         );
-        RadioButton preview = radio(
-                "模型預覽：執行 TFLite，但不點擊、不判斷結果",
-                AutoSettings.DETECTOR_MODEL_PREVIEW
-        );
         RadioButton verify = radio(
                 "模型驗證收集：實際點擊，再保存成功或誤判",
                 AutoSettings.DETECTOR_MODEL_VERIFY
         );
         detectorMode.addView(legacy);
-        detectorMode.addView(preview);
         detectorMode.addView(verify);
-        detectorMode.check(10_000 + settings.detectorMode);
-        content.addView(detectorMode);
-        addFieldHelp(
-                content,
-                "你說得正確：只有實際點擊後，才能根據是否進入捕捉、" +
-                        "設施或仍留在地圖，建立候選結果。沒有模型時先用既有規則收集；" +
-                        "純預覽只適合確認模型會框哪裡。"
+        detectorMode.check(
+                10_000 + (
+                        settings.detectorMode ==
+                                AutoSettings.DETECTOR_MODEL_VERIFY
+                                ? AutoSettings.DETECTOR_MODEL_VERIFY
+                                : AutoSettings.DETECTOR_LEGACY
+                )
         );
+        content.addView(detectorMode);
 
         EditText confidence = addNumberField(
                 content,
@@ -1086,9 +1082,6 @@ public final class MainActivity extends Activity {
         AutoSettings settings = AutoSettings.load(this);
         String mode;
         switch (settings.detectorMode) {
-            case AutoSettings.DETECTOR_MODEL_PREVIEW:
-                mode = "模型預覽，不點擊";
-                break;
             case AutoSettings.DETECTOR_MODEL_VERIFY:
                 mode = "模型驗證收集，會實際點擊";
                 break;

@@ -237,19 +237,6 @@ final class AutoPilotController {
             return;
         }
 
-        if (settings.detectorMode ==
-                AutoSettings.DETECTOR_MODEL_PREVIEW) {
-            recycleMapFrames();
-            service.autoStatus(
-                    "模型預覽：" + target.modelLabel +
-                            "，信任值 " +
-                            Math.round(target.confidence * 100f) +
-                            "%；預覽模式不點擊"
-            );
-            scheduleCycle(settings.scanIntervalMs, token);
-            return;
-        }
-
         lastTarget = target;
         mapBeforeTap = AutoScreenAnalyzer.signature(lastFrame);
         if (settings.collectModelEvents) {

@@ -126,6 +126,12 @@ final class AutoSettings {
                         values.getInt("detectorMode", settings.detectorMode)
                 )
         );
+        // Preview mode was removed in 0.16.0.  Existing installations that
+        // saved it return safely to the non-model detector until the user
+        // explicitly selects model verification.
+        if (settings.detectorMode == DETECTOR_MODEL_PREVIEW) {
+            settings.detectorMode = DETECTOR_LEGACY;
+        }
         settings.modelConfidenceThreshold = Math.max(
                 0.05f,
                 Math.min(
