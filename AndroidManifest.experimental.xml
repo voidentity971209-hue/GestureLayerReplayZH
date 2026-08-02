@@ -2,8 +2,8 @@
 <manifest
     xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.example.gesturereplayzh.autoexperimental"
-    android:versionCode="23"
-    android:versionName="0.16.0-experimental">
+    android:versionCode="24"
+    android:versionName="0.16.1-experimental">
 
     <uses-sdk android:minSdkVersion="30" android:targetSdkVersion="36" />
 

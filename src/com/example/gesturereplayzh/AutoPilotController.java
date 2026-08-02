@@ -17,7 +17,7 @@ import java.util.List;
 final class AutoPilotController {
     private static final String LOG_TAG = "GestureReplayAuto";
     private static final int MAP_FRAME_COUNT = 3;
-    private static final long MAP_FRAME_GAP_MS = 100L;
+    private static final long MAP_FRAME_GAP_MS = 200L;
     private static final long MIN_SCREENSHOT_INTERVAL_MS = 100L;
     private static final long POST_TAP_CLASSIFY_DELAY_MS = 450L;
     private static final long OPEN_SCREEN_POLL_MS = 180L;
@@ -213,6 +213,7 @@ final class AutoPilotController {
         AutoSettings settings = AutoSettings.load(service);
         Bitmap lastFrame = mapFrames.get(mapFrames.size() - 1);
         AutoScreenAnalyzer.TargetCandidate target;
+        boolean trackedRingWasPresent = false;
         if (settings.detectorMode == AutoSettings.DETECTOR_LEGACY) {
             target = AutoScreenAnalyzer.findMapTarget(
                     mapFrames,
@@ -220,8 +221,17 @@ final class AutoPilotController {
                     settings.pokemonOnlyMode
             );
         } else {
-            target = findModelTarget(lastFrame, settings);
-            if (target == null &&
+            AutoScreenAnalyzer.RingScanResult ringScan =
+                    AutoScreenAnalyzer.findTrackedWhiteRingTarget(
+                            mapFrames,
+                            activeBlockedPoints()
+                    );
+            trackedRingWasPresent = ringScan.sawTrackedRing;
+            target = trackedRingWasPresent
+                    ? ringScan.target
+                    : findModelTarget(lastFrame, settings);
+            if (!trackedRingWasPresent &&
+                    target == null &&
                     !ModelManager.hasActive(service)) {
                 recycleMapFrames();
                 service.autoStatus(

@@ -249,12 +249,15 @@ final class AutoScreenAnalyzer {
         if (frames.size() < 3) {
             return null;
         }
-        TargetCandidate animatedRing = findAnimatedPokemonRingTarget(
+        RingScanResult ringScan = findTrackedWhiteRingTarget(
                 frames,
                 blockedPoints
         );
-        if (animatedRing != null) {
-            return animatedRing;
+        if (ringScan.target != null) {
+            return ringScan.target;
+        }
+        if (ringScan.sawTrackedRing) {
+            return null;
         }
         int width = frames.get(frames.size() / 2).getWidth();
         int height = frames.get(frames.size() / 2).getHeight();
@@ -315,13 +318,12 @@ final class AutoScreenAnalyzer {
     }
 
     /**
-     * Pokémon map encounters repeatedly draw a pale horizontal ground ring.
-     * Prefer a stable ring centre whose radius changes over three consecutive
-     * frames.  A growth followed by a reset, or a visible contraction, is
-     * accepted as the animation cycle.  When no such ring exists, callers
-     * continue with the legacy motion/component detector below.
+     * Track pale horizontal rings across three consecutive map frames. Average
+     * each ring's centre, then remove the player's ring, stable thick Gym
+     * rings and stable cyan PokéStop structures. Rank all remaining rings by
+     * confidence. The legacy detector runs only when no ring is tracked.
      */
-    private static TargetCandidate findAnimatedPokemonRingTarget(
+    static RingScanResult findTrackedWhiteRingTarget(
             List<Bitmap> frames,
             List<PointF> blockedPoints
     ) {
@@ -337,7 +339,7 @@ final class AutoScreenAnalyzer {
                 Math.min(middle.getHeight(), last.getHeight())
         );
         if (width <= 0 || height <= 0) {
-            return null;
+            return RingScanResult.none();
         }
 
         Bounds bounds = Bounds.forMap(width, height);
@@ -351,6 +353,7 @@ final class AutoScreenAnalyzer {
         float minimumRadiusChange = Math.max(3f, width * 0.0045f);
         TargetCandidate best = null;
         float bestPreference = -Float.MAX_VALUE;
+        boolean sawTrackedRing = false;
 
         for (RingObservation centerRing : middleRings) {
             RingObservation before = nearestRing(
@@ -366,26 +369,11 @@ final class AutoScreenAnalyzer {
             if (before == null || after == null) {
                 continue;
             }
+            sawTrackedRing = true;
 
             float firstRadius = before.radius;
             float middleRadius = centerRing.radius;
             float lastRadius = after.radius;
-            boolean steadilyExpanding =
-                    middleRadius >= firstRadius + minimumRadiusChange &&
-                            lastRadius >= middleRadius + minimumRadiusChange;
-            boolean steadilyContracting =
-                    middleRadius <= firstRadius - minimumRadiusChange &&
-                            lastRadius <= middleRadius - minimumRadiusChange;
-            boolean expandedThenReset =
-                    middleRadius >= firstRadius + minimumRadiusChange &&
-                            lastRadius <= middleRadius -
-                                    minimumRadiusChange * 1.35f;
-            if (!steadilyExpanding &&
-                    !steadilyContracting &&
-                    !expandedThenReset) {
-                continue;
-            }
-
             float centerX = (
                     before.centerX +
                             centerRing.centerX +
@@ -399,7 +387,21 @@ final class AutoScreenAnalyzer {
             float averageRadius = (
                     firstRadius +
                             middleRadius +
-                            lastRadius
+                    lastRadius
+            ) / 3f;
+            float minimumRadius = Math.min(
+                    firstRadius,
+                    Math.min(middleRadius, lastRadius)
+            );
+            float maximumRadius = Math.max(
+                    firstRadius,
+                    Math.max(middleRadius, lastRadius)
+            );
+            float radiusChange = maximumRadius - minimumRadius;
+            float averageThickness = (
+                    before.thicknessScore +
+                            centerRing.thicknessScore +
+                            after.thicknessScore
             ) / 3f;
 
             if (isBlocked(
@@ -423,6 +425,22 @@ final class AutoScreenAnalyzer {
                 continue;
             }
 
+            boolean stableRadius = radiusChange < minimumRadiusChange;
+            boolean stableThickGymRing =
+                    stableRadius &&
+                            averageRadius >= width * 0.070f &&
+                            averageThickness >= 0.46f;
+            if (stableThickGymRing || looksLikeBlueStopAtRing(
+                    middle,
+                    centerX,
+                    centerY,
+                    averageRadius,
+                    stableRadius,
+                    bounds
+            )) {
+                continue;
+            }
+
             float objectScore = pokemonAboveRingScore(
                     middle,
                     centerX,
@@ -430,19 +448,40 @@ final class AutoScreenAnalyzer {
                     averageRadius,
                     bounds
             );
-            if (objectScore < 0.085f) {
-                continue;
-            }
-
             float animationScore = (
                     before.score +
                             centerRing.score +
                             after.score
             ) / 3f;
+            float centerDrift = Math.max(
+                    distance(
+                            before.centerX,
+                            before.centerY,
+                            centerX,
+                            centerY
+                    ),
+                    distance(
+                            after.centerX,
+                            after.centerY,
+                            centerX,
+                            centerY
+                    )
+            );
+            float centerStability = Math.max(
+                    0f,
+                    1f - centerDrift / Math.max(1f, matchRadius)
+            );
+            float radiusMotion = Math.min(
+                    1f,
+                    radiusChange /
+                            Math.max(1f, minimumRadiusChange * 2f)
+            );
             float confidence = Math.min(
                     0.96f,
-                    animationScore * 0.62f +
-                            Math.min(1f, objectScore * 4f) * 0.38f
+                    animationScore * 0.38f +
+                            radiusMotion * 0.28f +
+                            Math.min(1f, objectScore * 4f) * 0.26f +
+                            centerStability * 0.08f
             );
             float preference = confidence -
                     distanceFromCenter(
@@ -460,7 +499,7 @@ final class AutoScreenAnalyzer {
                 );
             }
         }
-        return best;
+        return new RingScanResult(sawTrackedRing, best);
     }
 
     private static List<RingObservation> findPaleMapRings(
@@ -516,7 +555,14 @@ final class AutoScreenAnalyzer {
                                 centerX,
                                 centerY,
                                 radius,
-                                score
+                                score,
+                                paleBandThicknessScore(
+                                        bitmap,
+                                        centerX,
+                                        centerY,
+                                        radius,
+                                        radius * 0.48f
+                                )
                         );
                     }
                 }
@@ -601,6 +647,42 @@ final class AutoScreenAnalyzer {
                 y < bitmap.getHeight();
     }
 
+    private static float paleBandThicknessScore(
+            Bitmap bitmap,
+            float centerX,
+            float centerY,
+            float radiusX,
+            float radiusY
+    ) {
+        int paleSamples = 0;
+        int validSamples = 0;
+        float[] offsets = {
+                -0.09f, -0.06f, -0.03f,
+                0.03f, 0.06f, 0.09f
+        };
+        for (float offset : offsets) {
+            for (int sample = 0; sample < 24; sample++) {
+                double angle = Math.PI * 2.0 * sample / 24.0;
+                int x = Math.round(
+                        centerX + radiusX * (1f + offset) *
+                                (float) Math.cos(angle)
+                );
+                int y = Math.round(
+                        centerY + radiusY * (1f + offset) *
+                                (float) Math.sin(angle)
+                );
+                if (!inside(bitmap, x, y)) {
+                    continue;
+                }
+                if (isPaleRingPixel(bitmap.getPixel(x, y))) {
+                    paleSamples++;
+                }
+                validSamples++;
+            }
+        }
+        return paleSamples / (float) Math.max(1, validSamples);
+    }
+
     private static void addRingObservation(
             List<RingObservation> observations,
             RingObservation candidate,
@@ -650,10 +732,79 @@ final class AutoScreenAnalyzer {
     ) {
         float dx = centerX - width * PLAYER_CENTER_X_RATIO;
         float dy = centerY - height * PLAYER_CENTER_Y_RATIO;
-        float playerDistance = width * 0.095f;
-        return radius >= width * 0.070f &&
-                dx * dx + dy * dy <=
-                        playerDistance * playerDistance;
+        float playerDistance = width * 0.105f;
+        boolean nearPlayerCenter =
+                dx * dx + dy * dy <= playerDistance * playerDistance;
+        boolean muchLargerThanPokemonRing = radius >= width * 0.075f;
+        return nearPlayerCenter && muchLargerThanPokemonRing;
+    }
+
+    private static boolean looksLikeBlueStopAtRing(
+            Bitmap bitmap,
+            float centerX,
+            float centerY,
+            float radius,
+            boolean stableRadius,
+            Bounds bounds
+    ) {
+        if (!stableRadius) {
+            return false;
+        }
+        int left = Math.max(
+                bounds.left,
+                Math.round(centerX - radius * 0.90f)
+        );
+        int right = Math.min(
+                bounds.right,
+                Math.round(centerX + radius * 0.90f)
+        );
+        int top = Math.max(
+                bounds.top,
+                Math.round(centerY - radius * 2.80f)
+        );
+        int bottom = Math.min(
+                bounds.bottom,
+                Math.round(centerY + radius * 0.18f)
+        );
+        if (right <= left || bottom <= top) {
+            return false;
+        }
+        VisualStats structure = visualStats(
+                bitmap,
+                left,
+                top,
+                right,
+                bottom
+        );
+        RegionStats support = stats(
+                bitmap,
+                Math.max(bounds.left, centerX - radius * 0.55f) /
+                        bitmap.getWidth(),
+                Math.max(bounds.top, centerY - radius * 1.25f) /
+                        bitmap.getHeight(),
+                Math.min(bounds.right, centerX + radius * 0.55f) /
+                        bitmap.getWidth(),
+                Math.min(bounds.bottom, centerY + radius * 0.25f) /
+                        bitmap.getHeight()
+        );
+        return structure.cyanRatio > 0.125f &&
+                structure.cyanRatio > structure.warmRatio * 1.30f &&
+                structure.edgeRatio > 0.065f &&
+                (
+                        support.blueRatio > 0.20f ||
+                                support.whiteRatio > 0.030f
+                );
+    }
+
+    private static float distance(
+            float firstX,
+            float firstY,
+            float secondX,
+            float secondY
+    ) {
+        float dx = firstX - secondX;
+        float dy = firstY - secondY;
+        return (float) Math.sqrt(dx * dx + dy * dy);
     }
 
     private static float pokemonAboveRingScore(
@@ -1846,17 +1997,34 @@ final class AutoScreenAnalyzer {
         final float centerY;
         final float radius;
         final float score;
+        final float thicknessScore;
 
         RingObservation(
                 float centerX,
                 float centerY,
                 float radius,
-                float score
+                float score,
+                float thicknessScore
         ) {
             this.centerX = centerX;
             this.centerY = centerY;
             this.radius = radius;
             this.score = score;
+            this.thicknessScore = thicknessScore;
+        }
+    }
+
+    static final class RingScanResult {
+        final boolean sawTrackedRing;
+        final TargetCandidate target;
+
+        RingScanResult(boolean sawTrackedRing, TargetCandidate target) {
+            this.sawTrackedRing = sawTrackedRing;
+            this.target = target;
+        }
+
+        static RingScanResult none() {
+            return new RingScanResult(false, null);
         }
     }
 
