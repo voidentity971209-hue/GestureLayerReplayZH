@@ -247,7 +247,7 @@ final class AutoPilotController {
             target = AutoScreenAnalyzer.findMapTarget(
                     mapFrames,
                     activeBlockedPoints(),
-                    settings.legacySensitivity >= 2,
+                    settings.legacySensitivity >= 1,
                     settings.blockedRadiusRatio
             );
             if (settings.legacySensitivity == 0 &&

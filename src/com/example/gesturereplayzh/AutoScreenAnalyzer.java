@@ -118,9 +118,9 @@ final class AutoScreenAnalyzer {
             Bitmap bitmap,
             FrameSignature mapBeforeTap
     ) {
-        // The flee icon is the sole encounter signal.  It must be checked
-        // before the map: the large throw ball and two lower encounter buttons
-        // can otherwise resemble the map menu and side controls.
+        // A map also contains a running-person icon and lower controls.  Only
+        // accept an encounter when the flee icon, both side docks and the
+        // large central throw ball are present together.
         if (looksLikeEncounterReady(bitmap)) {
             return ScreenState.ENCOUNTER;
         }
@@ -132,6 +132,9 @@ final class AutoScreenAnalyzer {
         }
         if (looksLikeMapScreen(bitmap)) {
             return ScreenState.MAP_RETURNED;
+        }
+        if (looksLikeCaptureAnimation(bitmap)) {
+            return ScreenState.ENCOUNTER_WAIT;
         }
         if (mapBeforeTap != null &&
                 mapBeforeTap.distance(new FrameSignature(bitmap)) < 0.105f &&
@@ -424,7 +427,9 @@ final class AutoScreenAnalyzer {
                         Math.round(sortedDifferences.length * 0.70f)
                 )
         ];
-        int threshold = Math.max(42, Math.min(120, percentile70 + 24));
+        int threshold = fastRecall
+                ? Math.max(30, Math.min(96, percentile70 + 14))
+                : Math.max(42, Math.min(120, percentile70 + 24));
 
         boolean[] rawMotion = new boolean[columns * rows];
         for (int row = 0; row < rows; row++) {
@@ -1307,7 +1312,8 @@ final class AutoScreenAnalyzer {
 
     private static boolean looksLikeEncounterReady(Bitmap bitmap) {
         return looksLikeFleeIcon(bitmap) &&
-                looksLikeEncounterSideDocks(bitmap);
+                looksLikeEncounterSideDocks(bitmap) &&
+                findEncounterBallCircleScore(bitmap) >= 0.15f;
     }
 
     static boolean isStrictMapScreen(Bitmap bitmap) {
@@ -1379,7 +1385,8 @@ final class AutoScreenAnalyzer {
     }
 
     private static boolean looksLikeCaptureAnimation(Bitmap bitmap) {
-        return looksLikeFleeIcon(bitmap);
+        return looksLikeFleeIcon(bitmap) &&
+                findEncounterBallCircleScore(bitmap) >= 0.08f;
     }
 
     private static boolean looksLikeEncounterSideDocks(Bitmap bitmap) {
@@ -1398,10 +1405,12 @@ final class AutoScreenAnalyzer {
                         rightDock.yellowRatio >= 0.006f) &&
                         (rightDock.whiteRatio >= 0.010f ||
                                 rightDock.darkRatio >= 0.040f);
-        boolean leftPresent = leftDock.edgeRatio >= 0.045f &&
-                leftCircle >= 0.16f && berryContent;
-        boolean rightPresent = rightDock.edgeRatio >= 0.045f &&
-                rightCircle >= 0.16f && ballContent;
+        boolean leftPresent = leftDock.edgeRatio >= 0.025f &&
+                leftCircle >= 0.10f &&
+                (berryContent || leftDock.whiteRatio >= 0.025f);
+        boolean rightPresent = rightDock.edgeRatio >= 0.025f &&
+                rightCircle >= 0.10f &&
+                (ballContent || rightDock.whiteRatio >= 0.025f);
         return leftPresent && rightPresent;
     }
 
@@ -1573,8 +1582,17 @@ final class AutoScreenAnalyzer {
                 0.150f,
                 28
         );
-        return iconEdges >= 0.12f &&
-                iconEdges - surroundingEdges >= 0.065f;
+        RegionStats fixedIcon = stats(
+                bitmap,
+                0.045f,
+                0.040f,
+                0.150f,
+                0.130f
+        );
+        return (iconEdges >= 0.12f &&
+                iconEdges - surroundingEdges >= 0.065f) ||
+                (fixedIcon.whiteRatio >= 0.020f &&
+                        fixedIcon.edgeRatio >= 0.060f);
     }
 
     private static float edgeRatioInRegion(
