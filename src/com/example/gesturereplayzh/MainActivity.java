@@ -660,6 +660,18 @@ public final class MainActivity extends Activity {
                 "兩輪地圖掃描之間等待多久。數值越小反應越快，" +
                         "但耗電、發熱與畫面尚未穩定就誤判的機率也會增加。"
         );
+        EditText recognitionFrameCount = addIntegerField(
+                fields,
+                "畫面判定連續截圖數（1～5）",
+                settings.recognitionFrameCount
+        );
+        addFieldHelp(
+                fields,
+                "預設 1 張：捕捉、X 與地圖介面看到一次就採用，最省電。" +
+                        "提高數量可降低瞬間誤判，但會更慢、更耗電。" +
+                        "舊規則的寶可夢候選本身仍需要三張差異圖；" +
+                        "TFLite 模型只分析單張。"
+        );
         CheckBox pokemonOnlyMode = new CheckBox(this);
         pokemonOnlyMode.setText(
                 "只抓寶可夢測試模式（不點補給站，建議保持開啟）"
@@ -781,6 +793,12 @@ public final class MainActivity extends Activity {
                     nonEmpty(exitDescription, settings.exitDescription);
             settings.scanIntervalMs =
                     seconds(scanInterval, settings.scanIntervalMs);
+            settings.recognitionFrameCount = integerValue(
+                    recognitionFrameCount,
+                    settings.recognitionFrameCount,
+                    1,
+                    5
+            );
             settings.pokemonOnlyMode = pokemonOnlyMode.isChecked();
             settings.rocketTapIntervalMs =
                     seconds(rocketInterval, settings.rocketTapIntervalMs);

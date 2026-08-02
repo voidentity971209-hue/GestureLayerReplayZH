@@ -22,7 +22,6 @@ final class AutoPilotController {
     private static final long POST_TAP_CLASSIFY_DELAY_MS = 450L;
     private static final long OPEN_SCREEN_POLL_MS = 180L;
     private static final int MAX_OPEN_SCREEN_POLLS = 12;
-    private static final int REQUIRED_ENCOUNTER_POLLS = 2;
     private static final int MAX_CATCH_RETRIES = 2;
     private static final long CATCH_RETRY_DELAY_MS = 900L;
     private static final long NON_ENCOUNTER_COOLDOWN_MS = 12_000L;
@@ -104,8 +103,18 @@ final class AutoPilotController {
             switch (state) {
                 case ENCOUNTER:
                     recycle(bitmap);
-                    service.autoStatus("捕捉三項介面第一次成立，等待再次確認");
-                    confirmEncounterBeforeCatch(token, 1);
+                    if (settings.recognitionFrameCount <= 1) {
+                        service.autoStatus(settings.encounterDescription);
+                        handler.postDelayed(
+                                () -> playCatchGesture(token, 0),
+                                settings.beforeCatchMs
+                        );
+                    } else {
+                        service.autoStatus(
+                                "捕捉三項介面第一次成立，等待再次確認"
+                        );
+                        confirmEncounterBeforeCatch(token, 1);
+                    }
                     break;
                 case ENCOUNTER_WAIT:
                     recycle(bitmap);
@@ -116,7 +125,8 @@ final class AutoPilotController {
                     );
                     break;
                 case HAS_CLOSE_BUTTON:
-                    if (closeCount < 1) {
+                    if (closeCount + 1 <
+                            settings.recognitionFrameCount) {
                         recycle(bitmap);
                         handler.postDelayed(
                                 () -> inspectCurrentScreen(
@@ -149,7 +159,11 @@ final class AutoPilotController {
                     );
                     break;
                 case MAP_RETURNED:
-                    confirmMapBeforeScan(bitmap, token);
+                    if (settings.recognitionFrameCount <= 1) {
+                        beginMapScan(bitmap, token);
+                    } else {
+                        confirmMapBeforeScan(bitmap, token, 1);
+                    }
                     break;
                 case ROCKET_DIALOG:
                     recycle(bitmap);
@@ -159,11 +173,15 @@ final class AutoPilotController {
                 case UNKNOWN:
                 default:
                     recycle(bitmap);
-                    if (unknownCount >= 8) {
+                    if (unknownCount + 1 >=
+                            settings.recognitionFrameCount) {
                         service.autoStatus(
                                 "畫面尚未確認，不執行點擊，稍後重新判斷"
                         );
-                        scheduleCycle(settings.scanIntervalMs, token);
+                        scheduleCycle(
+                                Math.max(500L, settings.scanIntervalMs),
+                                token
+                        );
                     } else {
                         handler.postDelayed(
                                 () -> inspectCurrentScreen(
@@ -354,7 +372,8 @@ final class AutoPilotController {
             switch (state) {
                 case ENCOUNTER:
                     int nextEncounterCount = encounterCount + 1;
-                    if (nextEncounterCount >= REQUIRED_ENCOUNTER_POLLS) {
+                    if (nextEncounterCount >=
+                            settings.recognitionFrameCount) {
                         completeModelEvent(bitmap, "encounter", settings);
                         recycle(bitmap);
                         mapBeforeTap = null;
@@ -387,12 +406,28 @@ final class AutoPilotController {
                     );
                     break;
                 case MAP_RETURNED:
-                    recycle(bitmap);
-                    service.autoStatus("第一次看到地圖，等待第二張確認");
-                    confirmMapReturnedAfterTap(token);
+                    if (settings.recognitionFrameCount <= 1) {
+                        completeModelEvent(
+                                bitmap,
+                                "map_unchanged",
+                                settings
+                        );
+                        recycle(bitmap);
+                        mapBeforeTap = null;
+                        blockLastTarget();
+                        service.autoStatus("已確認回到地圖，解除狀態鎖");
+                        scheduleCycle(settings.scanIntervalMs, token);
+                    } else {
+                        recycle(bitmap);
+                        service.autoStatus(
+                                "第一次看到地圖，等待後續截圖確認"
+                        );
+                        confirmMapReturnedAfterTap(token, 1);
+                    }
                     break;
                 case HAS_CLOSE_BUTTON:
-                    if (closeCount < 1) {
+                    if (closeCount + 1 <
+                            settings.recognitionFrameCount) {
                         recycle(bitmap);
                         pollOpenedScreen(
                                 token,
@@ -443,7 +478,14 @@ final class AutoPilotController {
                 case UNKNOWN:
                 default:
                     int nextUnknownCount = unknownCount + 1;
-                    if (pollCount + 1 >= MAX_OPEN_SCREEN_POLLS) {
+                    int fastPollLimit = Math.max(
+                            1,
+                            Math.min(
+                                    MAX_OPEN_SCREEN_POLLS,
+                                    settings.recognitionFrameCount
+                            )
+                    );
+                    if (pollCount + 1 >= fastPollLimit) {
                         completeModelEvent(bitmap, "unknown", settings);
                         recycle(bitmap);
                         service.autoStatus(
@@ -759,7 +801,10 @@ final class AutoPilotController {
         }
     }
 
-    private void confirmMapReturnedAfterTap(int token) {
+    private void confirmMapReturnedAfterTap(
+            int token,
+            int confirmedFrames
+    ) {
         if (!isCurrent(token)) {
             return;
         }
@@ -767,6 +812,16 @@ final class AutoPilotController {
                 () -> takeScreenshot(token, bitmap -> {
                     AutoSettings settings = AutoSettings.load(service);
                     if (AutoScreenAnalyzer.isStrictMapScreen(bitmap)) {
+                        int nextConfirmed = confirmedFrames + 1;
+                        if (nextConfirmed <
+                                settings.recognitionFrameCount) {
+                            recycle(bitmap);
+                            confirmMapReturnedAfterTap(
+                                    token,
+                                    nextConfirmed
+                            );
+                            return;
+                        }
                         completeModelEvent(
                                 bitmap,
                                 "map_unchanged",
@@ -809,7 +864,9 @@ final class AutoPilotController {
                         return;
                     }
                     int nextConfirmed = confirmedFrames + 1;
-                    if (nextConfirmed < REQUIRED_ENCOUNTER_POLLS) {
+                    if (nextConfirmed <
+                            AutoSettings.load(service)
+                                    .recognitionFrameCount) {
                         confirmEncounterBeforeCatch(token, nextConfirmed);
                         return;
                     }
@@ -824,7 +881,11 @@ final class AutoPilotController {
         );
     }
 
-    private void confirmMapBeforeScan(Bitmap firstFrame, int token) {
+    private void confirmMapBeforeScan(
+            Bitmap firstFrame,
+            int token,
+            int confirmedFrames
+    ) {
         if (!isCurrent(token)) {
             recycle(firstFrame);
             return;
@@ -832,8 +893,19 @@ final class AutoPilotController {
         handler.postDelayed(
                 () -> takeScreenshot(token, secondFrame -> {
                     if (AutoScreenAnalyzer.isStrictMapScreen(secondFrame)) {
+                        int nextConfirmed = confirmedFrames + 1;
+                        int required = AutoSettings.load(service)
+                                .recognitionFrameCount;
                         recycle(firstFrame);
-                        beginMapScan(secondFrame, token);
+                        if (nextConfirmed >= required) {
+                            beginMapScan(secondFrame, token);
+                        } else {
+                            confirmMapBeforeScan(
+                                    secondFrame,
+                                    token,
+                                    nextConfirmed
+                            );
+                        }
                         return;
                     }
                     recycle(firstFrame);

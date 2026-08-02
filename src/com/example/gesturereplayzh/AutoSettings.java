@@ -36,6 +36,7 @@ final class AutoSettings {
     boolean collectModelEvents;
     int dataLimitMb;
     int positiveSamplePercent;
+    int recognitionFrameCount;
 
     static AutoSettings load(Context context) {
         SharedPreferences values =
@@ -177,6 +178,16 @@ final class AutoSettings {
                         )
                 )
         );
+        settings.recognitionFrameCount = Math.max(
+                1,
+                Math.min(
+                        5,
+                        values.getInt(
+                                "recognitionFrameCount",
+                                settings.recognitionFrameCount
+                        )
+                )
+        );
         if (!values.getBoolean(V7_TIMING_MIGRATED, false)) {
             if (settings.scanIntervalMs == 800L) {
                 settings.scanIntervalMs = 300L;
@@ -237,6 +248,10 @@ final class AutoSettings {
                 .putBoolean("collectModelEvents", collectModelEvents)
                 .putInt("dataLimitMb", dataLimitMb)
                 .putInt("positiveSamplePercent", positiveSamplePercent)
+                .putInt(
+                        "recognitionFrameCount",
+                        Math.max(1, Math.min(5, recognitionFrameCount))
+                )
                 .apply();
     }
 
@@ -250,7 +265,7 @@ final class AutoSettings {
     private static AutoSettings defaults() {
         AutoSettings settings = new AutoSettings();
         settings.scanDescription = "三幀快速掃描：優先點擊小型獨立寶可夢候選";
-        settings.encounterDescription = "逃跑圖示與左右下欄位連續成立，播放目前手勢";
+        settings.encounterDescription = "逃跑圖示與左右下欄位成立，播放目前手勢";
         settings.rocketDescription = "火箭隊對話點擊兩次，每次相隔 0.6 秒，再退出";
         settings.exitDescription = "非捕捉畫面只在偵測到實際下方 X 後返回地圖";
         settings.scanIntervalMs = 200L;
@@ -273,6 +288,7 @@ final class AutoSettings {
         settings.collectModelEvents = true;
         settings.dataLimitMb = 500;
         settings.positiveSamplePercent = 20;
+        settings.recognitionFrameCount = 1;
         return settings;
     }
 
