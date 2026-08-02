@@ -6,10 +6,6 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-import tensorflow as tf
-from tflite_model_maker import model_spec, object_detector
-from tflite_model_maker.config import ExportFormat
-
 
 LABEL_MAP = {
     1: "pokemon",
@@ -19,7 +15,7 @@ LABEL_MAP = {
 }
 
 
-def load_split(root: Path, split: str):
+def load_split(root: Path, split: str, object_detector):
     directory = root / split
     return object_detector.DataLoader.from_pascal_voc(
         str(directory / "images"),
@@ -28,7 +24,7 @@ def load_split(root: Path, split: str):
     )
 
 
-def verify_model(model_path: Path) -> None:
+def verify_model(model_path: Path, tf) -> None:
     interpreter = tf.lite.Interpreter(model_path=str(model_path))
     inputs = interpreter.get_input_details()
     outputs = interpreter.get_output_details()
@@ -56,9 +52,28 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, default=8)
     args = parser.parse_args()
 
-    train = load_split(args.dataset, "train")
-    validation = load_split(args.dataset, "validation")
-    test = load_split(args.dataset, "test")
+    try:
+        import tensorflow as tf
+        from tflite_model_maker import model_spec, object_detector
+        from tflite_model_maker.config import ExportFormat
+    except (ModuleNotFoundError, ImportError) as error:
+        raise SystemExit(
+            "訓練套件尚未正確安裝。Windows 請直接雙擊 train_windows.cmd；"
+            "它會使用 Python 3.10 建立環境並安裝相容版本。\n"
+            f"原始錯誤：{error}"
+        ) from error
+
+    for split in ("train", "validation", "test"):
+        split_root = args.dataset / split
+        if not (split_root / "images").is_dir() or not (
+                split_root / "annotations").is_dir():
+            raise SystemExit(
+                f"資料集缺少 {split}。請先執行 prepare_dataset.py。"
+            )
+
+    train = load_split(args.dataset, "train", object_detector)
+    validation = load_split(args.dataset, "validation", object_detector)
+    test = load_split(args.dataset, "test", object_detector)
     spec = model_spec.get("efficientdet_lite0")
     spec.config.num_epochs = max(1, args.epochs)
     model = object_detector.create(
@@ -78,7 +93,7 @@ def main() -> None:
     )
     model_path = args.output / filename
     print("TFLite evaluation:", model.evaluate_tflite(str(model_path), test))
-    verify_model(model_path)
+    verify_model(model_path, tf)
     print("Ready to import into the app:", model_path.resolve())
 
 

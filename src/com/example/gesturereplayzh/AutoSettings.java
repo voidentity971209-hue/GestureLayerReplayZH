@@ -10,7 +10,6 @@ final class AutoSettings {
             "v10_phone_profile_migrated";
     static final String CURRENT_GESTURE_SOURCE = "current";
     static final int DETECTOR_LEGACY = 0;
-    static final int DETECTOR_MODEL_PREVIEW = 1;
     static final int DETECTOR_MODEL_VERIFY = 2;
 
     String scanDescription;
@@ -126,10 +125,8 @@ final class AutoSettings {
                         values.getInt("detectorMode", settings.detectorMode)
                 )
         );
-        // Preview mode was removed in 0.16.0.  Existing installations that
-        // saved it return safely to the non-model detector until the user
-        // explicitly selects model verification.
-        if (settings.detectorMode == DETECTOR_MODEL_PREVIEW) {
+        // Version 0.15 stored the removed preview option as value 1.
+        if (settings.detectorMode == 1) {
             settings.detectorMode = DETECTOR_LEGACY;
         }
         settings.modelConfidenceThreshold = Math.max(

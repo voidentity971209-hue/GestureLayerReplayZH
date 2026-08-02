@@ -213,7 +213,6 @@ final class AutoPilotController {
         AutoSettings settings = AutoSettings.load(service);
         Bitmap lastFrame = mapFrames.get(mapFrames.size() - 1);
         AutoScreenAnalyzer.TargetCandidate target;
-        boolean trackedRingWasPresent = false;
         if (settings.detectorMode == AutoSettings.DETECTOR_LEGACY) {
             target = AutoScreenAnalyzer.findMapTarget(
                     mapFrames,
@@ -221,17 +220,8 @@ final class AutoPilotController {
                     settings.pokemonOnlyMode
             );
         } else {
-            AutoScreenAnalyzer.RingScanResult ringScan =
-                    AutoScreenAnalyzer.findTrackedWhiteRingTarget(
-                            mapFrames,
-                            activeBlockedPoints()
-                    );
-            trackedRingWasPresent = ringScan.sawTrackedRing;
-            target = trackedRingWasPresent
-                    ? ringScan.target
-                    : findModelTarget(lastFrame, settings);
-            if (!trackedRingWasPresent &&
-                    target == null &&
+            target = findModelTarget(mapFrames, settings);
+            if (target == null &&
                     !ModelManager.hasActive(service)) {
                 recycleMapFrames();
                 service.autoStatus(
@@ -647,9 +637,10 @@ final class AutoPilotController {
     }
 
     private AutoScreenAnalyzer.TargetCandidate findModelTarget(
-            Bitmap frame,
+            List<Bitmap> frames,
             AutoSettings settings
     ) {
+        Bitmap frame = frames.get(frames.size() - 1);
         try {
             String currentToken = ModelManager.versionToken(service);
             if (!currentToken.equals(loadedModelToken)) {
@@ -682,6 +673,9 @@ final class AutoPilotController {
                 if (!"pokemon".equals(detection.label)) {
                     continue;
                 }
+                if (overlapsFacility(detection, detections, frame)) {
+                    continue;
+                }
                 float x = detection.screenBox.centerX();
                 float y = detection.screenBox.centerY();
                 float distance = (float) Math.hypot(
@@ -694,8 +688,20 @@ final class AutoPilotController {
                 }
                 float centerPreference =
                         1f - Math.min(1f, distance / radius);
-                float combined = detection.score * 0.85f +
-                        centerPreference * 0.15f;
+                float temporalSupport =
+                        AutoScreenAnalyzer.modelCandidateTemporalSupport(
+                                frames,
+                                detection.screenBox
+                        );
+                float backgroundSupport =
+                        AutoScreenAnalyzer.modelCandidateBackgroundSupport(
+                                frame,
+                                detection.screenBox
+                        );
+                float combined = detection.score * 0.75f +
+                        temporalSupport * 0.15f +
+                        backgroundSupport * 0.10f +
+                        centerPreference * 0.001f;
                 if (combined > bestScore) {
                     bestScore = combined;
                     best = new AutoScreenAnalyzer.TargetCandidate(
@@ -716,6 +722,34 @@ final class AutoPilotController {
             );
             return null;
         }
+    }
+
+    private boolean overlapsFacility(
+            TfliteObjectDetector.Detection pokemon,
+            List<TfliteObjectDetector.Detection> detections,
+            Bitmap frame
+    ) {
+        float marginX = frame.getWidth() * 0.035f;
+        float marginY = frame.getHeight() * 0.025f;
+        for (TfliteObjectDetector.Detection detection : detections) {
+            if ("pokemon".equals(detection.label)) {
+                continue;
+            }
+            RectF facility = new RectF(
+                    detection.screenBox.left - marginX,
+                    detection.screenBox.top - marginY,
+                    detection.screenBox.right + marginX,
+                    detection.screenBox.bottom + marginY
+            );
+            if (RectF.intersects(pokemon.screenBox, facility) ||
+                    facility.contains(
+                            pokemon.screenBox.centerX(),
+                            pokemon.screenBox.centerY()
+                    )) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private boolean isBlocked(PointF point) {
