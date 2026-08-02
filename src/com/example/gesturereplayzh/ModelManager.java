@@ -8,6 +8,7 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.Locale;
 
@@ -56,6 +57,7 @@ final class ModelManager {
         }
 
         String summary;
+        boolean labelsVerified = hasExpectedLabelMetadata(staging);
         try (TfliteObjectDetector detector =
                      new TfliteObjectDetector(staging, 1)) {
             summary = detector.modelSummary();
@@ -78,8 +80,11 @@ final class ModelManager {
                 .edit()
                 .putString("activeSha256", sha256(active))
                 .putLong("activeImportedAt", System.currentTimeMillis())
+                .putBoolean("activeLabelsVerified", labelsVerified)
                 .apply();
-        return summary;
+        return summary + (labelsVerified
+                ? "\n標籤 metadata 已驗證：pokemon、pokestop、gym、power_spot"
+                : "\n未找到標籤 metadata；推論將使用固定的四類順序");
     }
 
     static boolean restorePrevious(Context context) throws Exception {
@@ -164,6 +169,33 @@ final class ModelManager {
             return result.toString();
         } catch (Exception ignored) {
             return "unknown";
+        }
+    }
+
+    private static boolean hasExpectedLabelMetadata(File file) {
+        try (InputStream input = new FileInputStream(file)) {
+            byte[] data = new byte[(int) Math.min(
+                    file.length(),
+                    64L * 1024L * 1024L
+            )];
+            int offset = 0;
+            while (offset < data.length) {
+                int read = input.read(data, offset, data.length - offset);
+                if (read < 0) {
+                    break;
+                }
+                offset += read;
+            }
+            String raw = new String(
+                    data,
+                    0,
+                    offset,
+                    StandardCharsets.ISO_8859_1
+            ).toLowerCase(Locale.US);
+            return raw.contains("pokemon") && raw.contains("pokestop") &&
+                    raw.contains("gym") && raw.contains("power_spot");
+        } catch (Exception ignored) {
+            return false;
         }
     }
 }

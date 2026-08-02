@@ -682,6 +682,54 @@ public final class MainActivity extends Activity {
                 fields,
                 "開啟後不使用補給站作為備援目標，適合測試寶可夢辨識。"
         );
+        EditText legacySensitivity = addIntegerField(
+                fields,
+                "舊規則靈敏度（0 保守／1 平衡／2 快速）",
+                settings.legacySensitivity
+        );
+        addFieldHelp(
+                fields,
+                "只改變舊規則候選門檻，不改變要抓的目標類型。" +
+                        "保守可減少誤點；快速可提高找到寶可夢的機率。"
+        );
+        EditText scanRadius = addNumberField(
+                fields,
+                "玩家中心掃描半徑（螢幕寬度百分比，15～40）",
+                settings.scanRadiusRatio * 100f
+        );
+        EditText unknownTimeout = addNumberField(
+                fields,
+                "未知畫面安全停止時間（秒）",
+                settings.unknownTimeoutMs / 1000f
+        );
+        EditText closeTimeout = addNumberField(
+                fields,
+                "等待下方 X 最長時間（秒）",
+                settings.closeTimeoutMs / 1000f
+        );
+        CheckBox allowFallbackExit = new CheckBox(this);
+        allowFallbackExit.setText("X 逾時後允許使用備用退出座標（預設關閉）");
+        allowFallbackExit.setChecked(settings.allowFallbackExit);
+        fields.addView(allowFallbackExit);
+        addFieldHelp(
+                fields,
+                "關閉時，逾時會安全停止；開啟後才會使用下方設定的退出座標。"
+        );
+        EditText blockedDuration = addNumberField(
+                fields,
+                "錯誤位置封鎖時間（秒）",
+                settings.blockedDurationMs / 1000f
+        );
+        EditText blockedRadius = addNumberField(
+                fields,
+                "錯誤位置封鎖半徑（螢幕寬度百分比）",
+                settings.blockedRadiusRatio * 100f
+        );
+        EditText blockedMaxCount = addIntegerField(
+                fields,
+                "最多保存錯誤位置數量（1～200）",
+                settings.blockedMaxCount
+        );
         EditText rocketInterval = addNumberField(
                 fields,
                 "火箭隊每次對話點擊間隔（秒）",
@@ -747,7 +795,7 @@ public final class MainActivity extends Activity {
         addFieldHelp(
                 fields,
                 "座標使用螢幕百分比而非固定像素；X 從左到右，Y 從上到下。" +
-                        "只有無法偵測實際按鈕時才使用退出座標。"
+                        "只有開啟上方備用退出開關且等待 X 逾時時才使用。"
         );
         TextView catchSourceNotice = text(
                 "捕捉手勢來源固定為本實驗版主畫面的「目前手勢」，" +
@@ -800,6 +848,48 @@ public final class MainActivity extends Activity {
                     5
             );
             settings.pokemonOnlyMode = pokemonOnlyMode.isChecked();
+            settings.legacySensitivity = integerValue(
+                    legacySensitivity,
+                    settings.legacySensitivity,
+                    0,
+                    2
+            );
+            settings.scanRadiusRatio = Math.max(
+                    0.15f,
+                    Math.min(
+                            0.40f,
+                            percentage(scanRadius, settings.scanRadiusRatio)
+                    )
+            );
+            settings.unknownTimeoutMs = seconds(
+                    unknownTimeout,
+                    settings.unknownTimeoutMs
+            );
+            settings.closeTimeoutMs = seconds(
+                    closeTimeout,
+                    settings.closeTimeoutMs
+            );
+            settings.allowFallbackExit = allowFallbackExit.isChecked();
+            settings.blockedDurationMs = seconds(
+                    blockedDuration,
+                    settings.blockedDurationMs
+            );
+            settings.blockedRadiusRatio = Math.max(
+                    0.01f,
+                    Math.min(
+                            0.20f,
+                            percentage(
+                                    blockedRadius,
+                                    settings.blockedRadiusRatio
+                            )
+                    )
+            );
+            settings.blockedMaxCount = integerValue(
+                    blockedMaxCount,
+                    settings.blockedMaxCount,
+                    1,
+                    200
+            );
             settings.rocketTapIntervalMs =
                     seconds(rocketInterval, settings.rocketTapIntervalMs);
             settings.beforeCatchMs =

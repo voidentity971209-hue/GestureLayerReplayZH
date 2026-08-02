@@ -235,13 +235,22 @@ final class AutoScreenAnalyzer {
             List<Bitmap> frames,
             List<PointF> blockedPoints
     ) {
-        return findMapTarget(frames, blockedPoints, false);
+        return findMapTarget(frames, blockedPoints, false, 0.07f);
     }
 
     static TargetCandidate findMapTarget(
             List<Bitmap> frames,
             List<PointF> blockedPoints,
             boolean pokemonOnlyMode
+    ) {
+        return findMapTarget(frames, blockedPoints, pokemonOnlyMode, 0.07f);
+    }
+
+    static TargetCandidate findMapTarget(
+            List<Bitmap> frames,
+            List<PointF> blockedPoints,
+            boolean pokemonOnlyMode,
+            float blockedRadiusRatio
     ) {
         if (frames.size() < 3) {
             return null;
@@ -260,7 +269,8 @@ final class AutoScreenAnalyzer {
                     findMapCandidatesInWindow(
                             window,
                             blockedPoints,
-                            pokemonOnlyMode
+                            pokemonOnlyMode,
+                            blockedRadiusRatio
                     );
             for (TargetCandidate candidate : candidates) {
                 addCandidateToCluster(
@@ -363,7 +373,8 @@ final class AutoScreenAnalyzer {
     private static List<TargetCandidate> findMapCandidatesInWindow(
             List<Bitmap> frames,
             List<PointF> blockedPoints,
-            boolean fastRecall
+            boolean fastRecall,
+            float blockedRadiusRatio
     ) {
         List<TargetCandidate> result = new ArrayList<>();
         Bitmap first = frames.get(0);
@@ -454,6 +465,7 @@ final class AutoScreenAnalyzer {
                     width,
                     height,
                     blockedPoints,
+                    blockedRadiusRatio,
                     threshold,
                     fastRecall,
                     isPartOfExtendedMotionNetwork(
@@ -551,6 +563,7 @@ final class AutoScreenAnalyzer {
             int width,
             int height,
             List<PointF> blockedPoints,
+            float blockedRadiusRatio,
             int threshold,
             boolean fastRecall,
             boolean extendedBackgroundNetwork
@@ -582,7 +595,8 @@ final class AutoScreenAnalyzer {
                 component.weightedRow / Math.max(1f, component.weight) *
                         gridStep;
         weightedY = Math.min(bottom, weightedY + objectHeight * 0.12f);
-        if (isBlocked(weightedX, weightedY, width, blockedPoints)) {
+        if (isBlocked(weightedX, weightedY, width, blockedPoints,
+                blockedRadiusRatio)) {
             return null;
         }
 
@@ -1375,10 +1389,19 @@ final class AutoScreenAnalyzer {
                 stats(bitmap, 0.745f, 0.80f, 0.985f, 0.985f);
         float leftCircle = findEncounterDockCircleScore(bitmap, 0.115f);
         float rightCircle = findEncounterDockCircleScore(bitmap, 0.885f);
+        boolean berryContent = leftDock.redRatio >= 0.006f &&
+                (leftDock.greenRatio >= 0.004f ||
+                        leftDock.whiteRatio >= 0.012f);
+        boolean ballContent =
+                (rightDock.redRatio >= 0.009f ||
+                        rightDock.blueRatio >= 0.008f ||
+                        rightDock.yellowRatio >= 0.006f) &&
+                        (rightDock.whiteRatio >= 0.010f ||
+                                rightDock.darkRatio >= 0.040f);
         boolean leftPresent = leftDock.edgeRatio >= 0.045f &&
-                leftCircle >= 0.16f;
+                leftCircle >= 0.16f && berryContent;
         boolean rightPresent = rightDock.edgeRatio >= 0.045f &&
-                rightCircle >= 0.16f;
+                rightCircle >= 0.16f && ballContent;
         return leftPresent && rightPresent;
     }
 
@@ -1415,8 +1438,11 @@ final class AutoScreenAnalyzer {
         int step = Math.max(1, width / 360);
         int left = Math.round(width * 0.025f);
         int right = Math.round(width * 0.18f);
-        int top = Math.round(height * 0.052f);
-        int bottom = Math.round(height * 0.15f);
+        // The supplied 591x1280 capture places the flee icon at roughly
+        // x=5.5%-13% and y=4.8%-9.2%. Leave margin around that normalized
+        // anchor so the bright component is not clipped at the search edge.
+        int top = Math.round(height * 0.035f);
+        int bottom = Math.round(height * 0.14f);
         int columns = Math.max(1, (right - left) / step);
         int rows = Math.max(1, (bottom - top) / step);
         boolean[] bright = new boolean[columns * rows];
@@ -1497,17 +1523,33 @@ final class AutoScreenAnalyzer {
                 continue;
             }
             int componentRows = Math.max(1, maxRow - minRow + 1);
+            int componentColumns = Math.max(1,
+                    maxColumn - minColumn + 1);
+            int[][] poseCells = new int[3][3];
             for (int pixel : pixels) {
                 int row = pixel / columns;
+                int column = pixel % columns;
                 int band = Math.min(
                         2,
                         (row - minRow) * 3 / componentRows
                 );
                 verticalBands[band]++;
+                int columnBand = Math.min(
+                        2,
+                        (column - minColumn) * 3 / componentColumns
+                );
+                poseCells[band][columnBand]++;
             }
+            boolean headAndArm = poseCells[0][1] > 0 ||
+                    poseCells[0][2] > 0;
+            boolean torso = poseCells[1][0] > 0 &&
+                    (poseCells[1][1] > 0 || poseCells[1][2] > 0);
+            boolean separatedLegs = poseCells[2][0] > 0 &&
+                    poseCells[2][2] > 0;
             if (verticalBands[0] >= Math.max(2, count / 18) &&
                     verticalBands[1] >= Math.max(2, count / 12) &&
-                    verticalBands[2] >= Math.max(2, count / 18)) {
+                    verticalBands[2] >= Math.max(2, count / 18) &&
+                    headAndArm && torso && separatedLegs) {
                 return true;
             }
         }
@@ -1797,9 +1839,10 @@ final class AutoScreenAnalyzer {
             float x,
             float y,
             int width,
-            List<PointF> blockedPoints
+            List<PointF> blockedPoints,
+            float blockedRadiusRatio
     ) {
-        float radius = width * 0.07f;
+        float radius = width * blockedRadiusRatio;
         float radiusSquared = radius * radius;
         for (PointF point : blockedPoints) {
             float dx = x - point.x;

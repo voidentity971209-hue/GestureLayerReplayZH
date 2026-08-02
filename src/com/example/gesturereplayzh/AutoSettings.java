@@ -37,6 +37,14 @@ final class AutoSettings {
     int dataLimitMb;
     int positiveSamplePercent;
     int recognitionFrameCount;
+    int legacySensitivity;
+    float scanRadiusRatio;
+    long unknownTimeoutMs;
+    long closeTimeoutMs;
+    boolean allowFallbackExit;
+    long blockedDurationMs;
+    float blockedRadiusRatio;
+    int blockedMaxCount;
 
     static AutoSettings load(Context context) {
         SharedPreferences values =
@@ -188,6 +196,65 @@ final class AutoSettings {
                         )
                 )
         );
+        settings.legacySensitivity = Math.max(
+                0,
+                Math.min(
+                        2,
+                        values.getInt(
+                                "legacySensitivity",
+                                settings.legacySensitivity
+                        )
+                )
+        );
+        settings.scanRadiusRatio = Math.max(
+                0.15f,
+                Math.min(
+                        0.40f,
+                        values.getFloat(
+                                "scanRadiusRatio",
+                                settings.scanRadiusRatio
+                        )
+                )
+        );
+        settings.unknownTimeoutMs = readTime(
+                values,
+                "unknownTimeoutMs",
+                settings.unknownTimeoutMs
+        );
+        settings.closeTimeoutMs = readTime(
+                values,
+                "closeTimeoutMs",
+                settings.closeTimeoutMs
+        );
+        settings.allowFallbackExit = values.getBoolean(
+                "allowFallbackExit",
+                settings.allowFallbackExit
+        );
+        settings.blockedDurationMs = readTime(
+                values,
+                "blockedDurationMs",
+                settings.blockedDurationMs
+        );
+        settings.blockedRadiusRatio = Math.max(
+                0.01f,
+                Math.min(
+                        0.20f,
+                        values.getFloat(
+                                "blockedRadiusRatio",
+                                settings.blockedRadiusRatio
+                        )
+                )
+        );
+        settings.blockedMaxCount = Math.max(
+                1,
+                Math.min(
+                        200,
+                        values.getInt(
+                                "blockedMaxCount",
+                                settings.blockedMaxCount
+                        )
+                )
+        );
         if (!values.getBoolean(V7_TIMING_MIGRATED, false)) {
             if (settings.scanIntervalMs == 800L) {
                 settings.scanIntervalMs = 300L;
@@ -252,6 +319,32 @@ final class AutoSettings {
                         "recognitionFrameCount",
                         Math.max(1, Math.min(5, recognitionFrameCount))
                 )
+                .putInt(
+                        "legacySensitivity",
+                        Math.max(0, Math.min(2, legacySensitivity))
+                )
+                .putFloat(
+                        "scanRadiusRatio",
+                        Math.max(0.15f, Math.min(0.40f, scanRadiusRatio))
+                )
+                .putLong("unknownTimeoutMs", normalizeTime(unknownTimeoutMs))
+                .putLong("closeTimeoutMs", normalizeTime(closeTimeoutMs))
+                .putBoolean("allowFallbackExit", allowFallbackExit)
+                .putLong(
+                        "blockedDurationMs",
+                        normalizeTime(blockedDurationMs)
+                )
+                .putFloat(
+                        "blockedRadiusRatio",
+                        Math.max(
+                                0.01f,
+                                Math.min(0.20f, blockedRadiusRatio)
+                        )
+                )
+                .putInt(
+                        "blockedMaxCount",
+                        Math.max(1, Math.min(200, blockedMaxCount))
+                )
                 .apply();
     }
 
@@ -289,6 +382,14 @@ final class AutoSettings {
         settings.dataLimitMb = 500;
         settings.positiveSamplePercent = 20;
         settings.recognitionFrameCount = 1;
+        settings.legacySensitivity = 1;
+        settings.scanRadiusRatio = 0.38f;
+        settings.unknownTimeoutMs = 15000L;
+        settings.closeTimeoutMs = 10000L;
+        settings.allowFallbackExit = false;
+        settings.blockedDurationMs = 12000L;
+        settings.blockedRadiusRatio = 0.07f;
+        settings.blockedMaxCount = 40;
         return settings;
     }
 

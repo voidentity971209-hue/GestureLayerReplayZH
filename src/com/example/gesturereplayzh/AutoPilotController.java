@@ -12,6 +12,8 @@ import android.util.Log;
 import android.view.Display;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 
 final class AutoPilotController {
@@ -41,6 +43,7 @@ final class AutoPilotController {
     private TfliteObjectDetector modelDetector;
     private String loadedModelToken = "none";
     private String lastModelEventId;
+    private long openedStateStartedAt;
 
     AutoPilotController(GestureAccessibilityService service) {
         this.service = service;
@@ -70,6 +73,7 @@ final class AutoPilotController {
         mapBeforeTap = null;
         lastTarget = null;
         lastModelEventId = null;
+        openedStateStartedAt = 0L;
         closeModelDetector();
     }
 
@@ -204,6 +208,11 @@ final class AutoPilotController {
         }
         recycleMapFrames();
         mapFrames.add(firstFrame);
+        if (AutoSettings.load(service).detectorMode ==
+                AutoSettings.DETECTOR_MODEL_VERIFY) {
+            analyzeMapFrames(token);
+            return;
+        }
         handler.postDelayed(
                 () -> captureMapFrame(token),
                 MAP_FRAME_GAP_MS
@@ -228,7 +237,7 @@ final class AutoPilotController {
     }
 
     private void analyzeMapFrames(int token) {
-        if (!isCurrent(token) || mapFrames.size() < MAP_FRAME_COUNT) {
+        if (!isCurrent(token) || mapFrames.isEmpty()) {
             return;
         }
         AutoSettings settings = AutoSettings.load(service);
@@ -238,8 +247,13 @@ final class AutoPilotController {
             target = AutoScreenAnalyzer.findMapTarget(
                     mapFrames,
                     activeBlockedPoints(),
-                    settings.pokemonOnlyMode
+                    settings.legacySensitivity >= 2,
+                    settings.blockedRadiusRatio
             );
+            if (settings.legacySensitivity == 0 &&
+                    target != null && target.confidence < 0.52f) {
+                target = null;
+            }
         } else {
             target = findModelTarget(mapFrames, settings);
             if (target == null &&
@@ -251,6 +265,13 @@ final class AutoPilotController {
                 scheduleCycle(1200L, token);
                 return;
             }
+        }
+        if (target != null && !isInsideScanRadius(
+                target.point,
+                lastFrame,
+                settings.scanRadiusRatio
+        )) {
+            target = null;
         }
         if (target == null) {
             recycleMapFrames();
@@ -312,10 +333,13 @@ final class AutoPilotController {
                 target.point.x,
                 target.point.y,
                 token,
-                () -> handler.postDelayed(
-                        () -> inspectOpenedScreen(token, 0, 0, 0, 0),
-                        POST_TAP_CLASSIFY_DELAY_MS
-                ),
+                () -> {
+                    openedStateStartedAt = System.currentTimeMillis();
+                    handler.postDelayed(
+                            () -> inspectOpenedScreen(token, 0, 0, 0, 0),
+                            POST_TAP_CLASSIFY_DELAY_MS
+                    );
+                },
                 () -> {
                     ModelEventStore.discardIncomplete(
                             service,
@@ -343,6 +367,7 @@ final class AutoPilotController {
         mapBeforeTap = null;
         lastTarget = null;
         lastModelEventId = null;
+        openedStateStartedAt = 0L;
         service.autoStatus("已確認不是駕駛，2 秒後重新掃描");
         scheduleCycle(POST_TAP_CLASSIFY_DELAY_MS, token);
     }
@@ -369,6 +394,9 @@ final class AutoPilotController {
                             (lastTarget == null ? "none" : lastTarget.type)
             );
             AutoSettings settings = AutoSettings.load(service);
+            long openedElapsed = openedStateStartedAt <= 0L
+                    ? 0L
+                    : System.currentTimeMillis() - openedStateStartedAt;
             switch (state) {
                 case ENCOUNTER:
                     int nextEncounterCount = encounterCount + 1;
@@ -378,6 +406,7 @@ final class AutoPilotController {
                         recycle(bitmap);
                         mapBeforeTap = null;
                         lastTarget = null;
+                        openedStateStartedAt = 0L;
                         service.autoStatus(settings.encounterDescription);
                         handler.postDelayed(
                                 () -> playCatchGesture(token, 0),
@@ -415,6 +444,7 @@ final class AutoPilotController {
                         recycle(bitmap);
                         mapBeforeTap = null;
                         blockLastTarget();
+                        openedStateStartedAt = 0L;
                         service.autoStatus("已確認回到地圖，解除狀態鎖");
                         scheduleCycle(settings.scanIntervalMs, token);
                     } else {
@@ -438,12 +468,21 @@ final class AutoPilotController {
                         );
                         break;
                     }
+                    if (openedElapsed >= settings.closeTimeoutMs) {
+                        recycle(bitmap);
+                        handleCloseTimeout(token, settings);
+                        break;
+                    }
                     int width = bitmap.getWidth();
                     int height = bitmap.getHeight();
                     PointF openedClose =
                             AutoScreenAnalyzer.findCloseButton(bitmap);
                     if (openedClose == null) {
                         recycle(bitmap);
+                        if (openedElapsed >= settings.closeTimeoutMs) {
+                            handleCloseTimeout(token, settings);
+                            break;
+                        }
                         service.autoStatus("設施畫面尚未出現可確認的 X，繼續等待");
                         pollOpenedScreen(
                                 token,
@@ -458,6 +497,7 @@ final class AutoPilotController {
                     recycle(bitmap);
                     mapBeforeTap = null;
                     blockLastTarget();
+                    openedStateStartedAt = 0L;
                     service.autoStatus(settings.exitDescription);
                     dispatchTap(
                             openedClose.x,
@@ -472,11 +512,19 @@ final class AutoPilotController {
                     recycle(bitmap);
                     mapBeforeTap = null;
                     blockLastTarget();
+                    openedStateStartedAt = 0L;
                     service.autoStatus(settings.rocketDescription);
                     runRocketTap(token, 0);
                     break;
                 case UNKNOWN:
                 default:
+                    if (openedElapsed >= settings.unknownTimeoutMs) {
+                        completeModelEvent(bitmap, "unknown_timeout", settings);
+                        recycle(bitmap);
+                        service.autoStatus("無法確認目前畫面，已安全停止全自動");
+                        stop();
+                        break;
+                    }
                     int nextUnknownCount = unknownCount + 1;
                     int fastPollLimit = Math.max(
                             1,
@@ -543,6 +591,27 @@ final class AutoPilotController {
                         closeCount
                 ),
                 OPEN_SCREEN_POLL_MS
+        );
+    }
+
+    private void handleCloseTimeout(int token, AutoSettings settings) {
+        if (!settings.allowFallbackExit) {
+            service.autoStatus("等待 X 逾時，已安全停止全自動");
+            stop();
+            return;
+        }
+        PointF size = screenSize();
+        openedStateStartedAt = 0L;
+        service.autoStatus("等待 X 逾時，使用備援退出座標");
+        dispatchTap(
+                size.x * settings.exitXRatio,
+                size.y * settings.exitYRatio,
+                token,
+                () -> scheduleCycle(settings.afterExitMs, token),
+                () -> {
+                    service.autoStatus("備援退出失敗，已安全停止");
+                    stop();
+                }
         );
     }
 
@@ -700,14 +769,15 @@ final class AutoPilotController {
         if (lastTarget == null) {
             return;
         }
+        AutoSettings settings = AutoSettings.load(service);
         blockedTargets.add(
                 new BlockedTarget(
                         new PointF(lastTarget.point.x, lastTarget.point.y),
                         System.currentTimeMillis() +
-                                NON_ENCOUNTER_COOLDOWN_MS
+                                settings.blockedDurationMs
                 )
         );
-        if (blockedTargets.size() > 40) {
+        while (blockedTargets.size() > settings.blockedMaxCount) {
             blockedTargets.remove(0);
         }
         lastTarget = null;
@@ -741,9 +811,10 @@ final class AutoPilotController {
                             settings.modelConfidenceThreshold,
                             settings.modelMaxResults
                     );
+            detections = nonMaximumSuppression(detections, 0.45f);
             float playerX = frame.getWidth() * 0.50f;
             float playerY = frame.getHeight() * 0.63f;
-            float radius = frame.getWidth() * 0.38f;
+            float radius = frame.getWidth() * settings.scanRadiusRatio;
             AutoScreenAnalyzer.TargetCandidate best = null;
             float bestScore = -1f;
             for (TfliteObjectDetector.Detection detection : detections) {
@@ -775,10 +846,10 @@ final class AutoPilotController {
                                 frame,
                                 detection.screenBox
                         );
-                float combined = detection.score * 0.75f +
-                        temporalSupport * 0.15f +
+                float combined = detection.score * 0.70f +
+                        temporalSupport * 0.12f +
                         backgroundSupport * 0.10f +
-                        centerPreference * 0.001f;
+                        centerPreference * 0.08f;
                 if (combined > bestScore) {
                     bestScore = combined;
                     best = new AutoScreenAnalyzer.TargetCandidate(
@@ -946,7 +1017,8 @@ final class AutoPilotController {
     }
 
     private boolean isBlocked(PointF point) {
-        float radius = screenSize().x * 0.07f;
+        float radius = screenSize().x *
+                AutoSettings.load(service).blockedRadiusRatio;
         for (PointF blocked : activeBlockedPoints()) {
             if (Math.hypot(
                     point.x - blocked.x,
@@ -956,6 +1028,65 @@ final class AutoPilotController {
             }
         }
         return false;
+    }
+
+    private boolean isInsideScanRadius(
+            PointF point,
+            Bitmap frame,
+            float radiusRatio
+    ) {
+        float playerX = frame.getWidth() * 0.50f;
+        float playerY = frame.getHeight() * 0.63f;
+        float radius = frame.getWidth() * radiusRatio;
+        return Math.hypot(point.x - playerX, point.y - playerY) <= radius;
+    }
+
+    private List<TfliteObjectDetector.Detection> nonMaximumSuppression(
+            List<TfliteObjectDetector.Detection> source,
+            float threshold
+    ) {
+        List<TfliteObjectDetector.Detection> sorted =
+                new ArrayList<>(source);
+        Collections.sort(sorted, new Comparator<TfliteObjectDetector.Detection>() {
+            @Override
+            public int compare(
+                    TfliteObjectDetector.Detection left,
+                    TfliteObjectDetector.Detection right
+            ) {
+                return Float.compare(right.score, left.score);
+            }
+        });
+        List<TfliteObjectDetector.Detection> kept = new ArrayList<>();
+        for (TfliteObjectDetector.Detection candidate : sorted) {
+            boolean suppressed = false;
+            for (TfliteObjectDetector.Detection accepted : kept) {
+                if (candidate.label.equals(accepted.label) &&
+                        intersectionOverUnion(candidate.screenBox,
+                                accepted.screenBox) > threshold) {
+                    suppressed = true;
+                    break;
+                }
+            }
+            if (!suppressed) {
+                kept.add(candidate);
+            }
+        }
+        return kept;
+    }
+
+    private float intersectionOverUnion(RectF left, RectF right) {
+        float intersectionLeft = Math.max(left.left, right.left);
+        float intersectionTop = Math.max(left.top, right.top);
+        float intersectionRight = Math.min(left.right, right.right);
+        float intersectionBottom = Math.min(left.bottom, right.bottom);
+        float intersectionWidth = Math.max(0f,
+                intersectionRight - intersectionLeft);
+        float intersectionHeight = Math.max(0f,
+                intersectionBottom - intersectionTop);
+        float intersection = intersectionWidth * intersectionHeight;
+        float union = left.width() * left.height() +
+                right.width() * right.height() - intersection;
+        return union <= 0f ? 0f : intersection / union;
     }
 
     private void completeModelEvent(
