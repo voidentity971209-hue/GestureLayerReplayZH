@@ -32,6 +32,11 @@ public final class GestureAccessibilityService extends AccessibilityService {
         void onCancelled();
     }
 
+    interface AutoTapCallback {
+        void onCompleted();
+        void onCancelled();
+    }
+
     private static volatile GestureAccessibilityService instance;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -471,6 +476,33 @@ public final class GestureAccessibilityService extends AccessibilityService {
     }
 
     void dispatchAutoTap(float x, float y, Runnable completion) {
+        dispatchAutoTap(
+                x,
+                y,
+                new AutoTapCallback() {
+                    @Override
+                    public void onCompleted() {
+                        completion.run();
+                    }
+
+                    @Override
+                    public void onCancelled() {
+                        // A cancelled tap did not happen. The caller must not
+                        // advance as if it succeeded.
+                    }
+                }
+        );
+    }
+
+    void dispatchAutoTap(
+            float x,
+            float y,
+            AutoTapCallback callback
+    ) {
+        if (gestureInFlight) {
+            callback.onCancelled();
+            return;
+        }
         Path tapPath = new Path();
         tapPath.moveTo(x, y);
         boolean accepted = dispatchGesture(
@@ -485,20 +517,20 @@ public final class GestureAccessibilityService extends AccessibilityService {
                     @Override
                     public void onCompleted(GestureDescription gestureDescription) {
                         gestureInFlight = false;
-                        completion.run();
+                        callback.onCompleted();
                     }
 
                     @Override
                     public void onCancelled(GestureDescription gestureDescription) {
                         gestureInFlight = false;
-                        completion.run();
+                        callback.onCancelled();
                     }
                 },
                 null
         );
         gestureInFlight = accepted;
         if (!accepted) {
-            completion.run();
+            callback.onCancelled();
         }
     }
 

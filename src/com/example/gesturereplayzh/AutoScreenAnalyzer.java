@@ -143,8 +143,7 @@ final class AutoScreenAnalyzer {
 
     static PointF findCloseButton(Bitmap bitmap) {
         if (looksLikeEncounterContext(bitmap) ||
-                looksLikeCaptureAnimation(bitmap) ||
-                looksLikeMapScreenRelaxed(bitmap)) {
+                looksLikeCaptureAnimation(bitmap)) {
             return null;
         }
         int width = bitmap.getWidth();
@@ -1293,7 +1292,12 @@ final class AutoScreenAnalyzer {
     }
 
     private static boolean looksLikeEncounterReady(Bitmap bitmap) {
-        return looksLikeFleeIcon(bitmap);
+        return looksLikeFleeIcon(bitmap) &&
+                looksLikeEncounterSideDocks(bitmap);
+    }
+
+    static boolean isStrictMapScreen(Bitmap bitmap) {
+        return looksLikeMapScreen(bitmap);
     }
 
     private static boolean looksLikeCloseButton(Bitmap bitmap) {
@@ -1357,11 +1361,52 @@ final class AutoScreenAnalyzer {
     }
 
     private static boolean looksLikeEncounterContext(Bitmap bitmap) {
-        return looksLikeFleeIcon(bitmap);
+        return looksLikeEncounterReady(bitmap);
     }
 
     private static boolean looksLikeCaptureAnimation(Bitmap bitmap) {
         return looksLikeFleeIcon(bitmap);
+    }
+
+    private static boolean looksLikeEncounterSideDocks(Bitmap bitmap) {
+        RegionStats leftDock =
+                stats(bitmap, 0.015f, 0.80f, 0.255f, 0.985f);
+        RegionStats rightDock =
+                stats(bitmap, 0.745f, 0.80f, 0.985f, 0.985f);
+        float leftCircle = findEncounterDockCircleScore(bitmap, 0.115f);
+        float rightCircle = findEncounterDockCircleScore(bitmap, 0.885f);
+        boolean leftPresent = leftDock.edgeRatio >= 0.045f &&
+                leftCircle >= 0.16f;
+        boolean rightPresent = rightDock.edgeRatio >= 0.045f &&
+                rightCircle >= 0.16f;
+        return leftPresent && rightPresent;
+    }
+
+    private static float findEncounterDockCircleScore(
+            Bitmap bitmap,
+            float centerXRatio
+    ) {
+        int width = bitmap.getWidth();
+        int height = bitmap.getHeight();
+        float best = 0f;
+        int yStart = Math.round(height * 0.845f);
+        int yEnd = Math.round(height * 0.955f);
+        int yStep = Math.max(4, height / 160);
+        int radiusStart = Math.max(10, Math.round(width * 0.035f));
+        int radiusEnd = Math.max(radiusStart, Math.round(width * 0.090f));
+        int radiusStep = Math.max(3, width / 180);
+        float centerX = width * centerXRatio;
+        for (int y = yStart; y <= yEnd; y += yStep) {
+            for (int radius = radiusStart;
+                 radius <= radiusEnd;
+                 radius += radiusStep) {
+                best = Math.max(
+                        best,
+                        circleBoundaryScore(bitmap, centerX, y, radius)
+                );
+            }
+        }
+        return best;
     }
 
     private static boolean looksLikeFleeIcon(Bitmap bitmap) {

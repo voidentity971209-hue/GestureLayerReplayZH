@@ -22,7 +22,7 @@ final class AutoPilotController {
     private static final long POST_TAP_CLASSIFY_DELAY_MS = 450L;
     private static final long OPEN_SCREEN_POLL_MS = 180L;
     private static final int MAX_OPEN_SCREEN_POLLS = 12;
-    private static final int REQUIRED_ENCOUNTER_POLLS = 1;
+    private static final int REQUIRED_ENCOUNTER_POLLS = 2;
     private static final int MAX_CATCH_RETRIES = 2;
     private static final long CATCH_RETRY_DELAY_MS = 900L;
     private static final long NON_ENCOUNTER_COOLDOWN_MS = 12_000L;
@@ -104,11 +104,8 @@ final class AutoPilotController {
             switch (state) {
                 case ENCOUNTER:
                     recycle(bitmap);
-                    service.autoStatus(settings.encounterDescription);
-                    handler.postDelayed(
-                            () -> playCatchGesture(token, 0),
-                            settings.beforeCatchMs
-                    );
+                    service.autoStatus("捕捉三項介面第一次成立，等待再次確認");
+                    confirmEncounterBeforeCatch(token, 1);
                     break;
                 case ENCOUNTER_WAIT:
                     recycle(bitmap);
@@ -143,14 +140,16 @@ final class AutoPilotController {
                         break;
                     }
                     service.autoStatus(settings.exitDescription);
-                    service.dispatchAutoTap(
+                    dispatchTap(
                             currentClose.x,
                             currentClose.y,
-                            () -> scheduleCycle(settings.afterExitMs, token)
+                            token,
+                            () -> scheduleCycle(settings.afterExitMs, token),
+                            () -> inspectCurrentScreen(token, 0, 0)
                     );
                     break;
                 case MAP_RETURNED:
-                    beginMapScan(bitmap, token);
+                    confirmMapBeforeScan(bitmap, token);
                     break;
                 case ROCKET_DIALOG:
                     recycle(bitmap);
@@ -291,13 +290,25 @@ final class AutoPilotController {
                         Math.round(target.point.x) + "," +
                         Math.round(target.point.y)
         );
-        service.dispatchAutoTap(
+        dispatchTap(
                 target.point.x,
                 target.point.y,
+                token,
                 () -> handler.postDelayed(
                         () -> inspectOpenedScreen(token, 0, 0, 0, 0),
                         POST_TAP_CLASSIFY_DELAY_MS
-                )
+                ),
+                () -> {
+                    ModelEventStore.discardIncomplete(
+                            service,
+                            lastModelEventId
+                    );
+                    lastModelEventId = null;
+                    mapBeforeTap = null;
+                    lastTarget = null;
+                    service.autoStatus("候選點擊被取消，沒有進入下一狀態");
+                    scheduleCycle(350L, token);
+                }
         );
     }
 
@@ -376,14 +387,9 @@ final class AutoPilotController {
                     );
                     break;
                 case MAP_RETURNED:
-                    completeModelEvent(bitmap, "map_unchanged", settings);
                     recycle(bitmap);
-                    mapBeforeTap = null;
-                    blockLastTarget();
-                    service.autoStatus(
-                            "未進入捕捉畫面，該小區域暫停 12 秒並繼續快掃"
-                    );
-                    scheduleCycle(settings.scanIntervalMs, token);
+                    service.autoStatus("第一次看到地圖，等待第二張確認");
+                    confirmMapReturnedAfterTap(token);
                     break;
                 case HAS_CLOSE_BUTTON:
                     if (closeCount < 1) {
@@ -418,10 +424,12 @@ final class AutoPilotController {
                     mapBeforeTap = null;
                     blockLastTarget();
                     service.autoStatus(settings.exitDescription);
-                    service.dispatchAutoTap(
+                    dispatchTap(
                             openedClose.x,
                             openedClose.y,
-                            () -> scheduleCycle(settings.afterExitMs, token)
+                            token,
+                            () -> scheduleCycle(settings.afterExitMs, token),
+                            () -> inspectOpenedScreen(token, 0, 0, 0, 0)
                     );
                     break;
                 case ROCKET_DIALOG:
@@ -438,14 +446,18 @@ final class AutoPilotController {
                     if (pollCount + 1 >= MAX_OPEN_SCREEN_POLLS) {
                         completeModelEvent(bitmap, "unknown", settings);
                         recycle(bitmap);
-                        mapBeforeTap = null;
-                        blockLastTarget();
                         service.autoStatus(
-                                "未確認畫面；不盲點任何位置，稍後重新辨識"
+                                "開啟結果仍不明；保持狀態鎖，不掃描也不點擊"
                         );
                         handler.postDelayed(
-                                () -> inspectCurrentScreen(token, 0, 0),
-                                Math.max(300L, settings.afterExitMs)
+                                () -> inspectOpenedScreen(
+                                        token,
+                                        0,
+                                        0,
+                                        0,
+                                        0
+                                ),
+                                Math.max(500L, settings.scanIntervalMs)
                         );
                     } else {
                         recycle(bitmap);
@@ -470,11 +482,13 @@ final class AutoPilotController {
             int closeCount
     ) {
         if (pollCount + 1 >= MAX_OPEN_SCREEN_POLLS) {
-            blockLastTarget();
-            service.autoStatus("畫面仍未確定，不盲點並重新辨識目前畫面");
+            service.autoStatus("畫面仍未確定；保持開啟結果狀態鎖");
             handler.postDelayed(
-                    () -> inspectCurrentScreen(token, 0, 0),
-                    OPEN_SCREEN_POLL_MS
+                    () -> inspectOpenedScreen(token, 0, 0, 0, 0),
+                    Math.max(
+                            500L,
+                            AutoSettings.load(service).scanIntervalMs
+                    )
             );
             return;
         }
@@ -508,19 +522,26 @@ final class AutoPilotController {
                     );
                     return;
                 }
-                service.dispatchAutoTap(
+                dispatchTap(
                         close.x,
                         close.y,
-                        () -> scheduleCycle(settings.afterExitMs, token)
+                        token,
+                        () -> scheduleCycle(settings.afterExitMs, token),
+                        () -> runRocketTap(token, completedTaps)
                 );
             });
             return;
         }
-        service.dispatchAutoTap(
+        dispatchTap(
                 screen.x * settings.rocketTapXRatio,
                 screen.y * settings.rocketTapYRatio,
+                token,
                 () -> handler.postDelayed(
                         () -> runRocketTap(token, completedTaps + 1),
+                        settings.rocketTapIntervalMs
+                ),
+                () -> handler.postDelayed(
+                        () -> runRocketTap(token, completedTaps),
                         settings.rocketTapIntervalMs
                 )
         );
@@ -738,6 +759,92 @@ final class AutoPilotController {
         }
     }
 
+    private void confirmMapReturnedAfterTap(int token) {
+        if (!isCurrent(token)) {
+            return;
+        }
+        handler.postDelayed(
+                () -> takeScreenshot(token, bitmap -> {
+                    AutoSettings settings = AutoSettings.load(service);
+                    if (AutoScreenAnalyzer.isStrictMapScreen(bitmap)) {
+                        completeModelEvent(
+                                bitmap,
+                                "map_unchanged",
+                                settings
+                        );
+                        recycle(bitmap);
+                        mapBeforeTap = null;
+                        blockLastTarget();
+                        service.autoStatus(
+                                "連續兩張確認已回地圖，解除狀態鎖"
+                        );
+                        scheduleCycle(settings.scanIntervalMs, token);
+                        return;
+                    }
+                    recycle(bitmap);
+                    service.autoStatus("第二張不是地圖，繼續等待開啟結果");
+                    inspectOpenedScreen(token, 0, 0, 0, 0);
+                }),
+                OPEN_SCREEN_POLL_MS
+        );
+    }
+
+    private void confirmEncounterBeforeCatch(
+            int token,
+            int confirmedFrames
+    ) {
+        if (!isCurrent(token)) {
+            return;
+        }
+        handler.postDelayed(
+                () -> takeScreenshot(token, bitmap -> {
+                    AutoScreenAnalyzer.ScreenState state =
+                            AutoScreenAnalyzer.classifyAfterTap(bitmap, null);
+                    recycle(bitmap);
+                    if (state != AutoScreenAnalyzer.ScreenState.ENCOUNTER) {
+                        service.autoStatus(
+                                "捕捉三項介面未持續成立，取消手勢並重新判斷"
+                        );
+                        inspectCurrentScreen(token, 0, 0);
+                        return;
+                    }
+                    int nextConfirmed = confirmedFrames + 1;
+                    if (nextConfirmed < REQUIRED_ENCOUNTER_POLLS) {
+                        confirmEncounterBeforeCatch(token, nextConfirmed);
+                        return;
+                    }
+                    AutoSettings settings = AutoSettings.load(service);
+                    service.autoStatus(settings.encounterDescription);
+                    handler.postDelayed(
+                            () -> playCatchGesture(token, 0),
+                            settings.beforeCatchMs
+                    );
+                }),
+                OPEN_SCREEN_POLL_MS
+        );
+    }
+
+    private void confirmMapBeforeScan(Bitmap firstFrame, int token) {
+        if (!isCurrent(token)) {
+            recycle(firstFrame);
+            return;
+        }
+        handler.postDelayed(
+                () -> takeScreenshot(token, secondFrame -> {
+                    if (AutoScreenAnalyzer.isStrictMapScreen(secondFrame)) {
+                        recycle(firstFrame);
+                        beginMapScan(secondFrame, token);
+                        return;
+                    }
+                    recycle(firstFrame);
+                    recycle(secondFrame);
+                    service.autoStatus("地圖介面未連續成立，不啟動掃描");
+                    inspectCurrentScreen(token, 0, 0);
+                }),
+                OPEN_SCREEN_POLL_MS
+        );
+    }
+
     private boolean overlapsFacility(
             TfliteObjectDetector.Detection pokemon,
             List<TfliteObjectDetector.Detection> detections,
@@ -828,6 +935,40 @@ final class AutoPilotController {
         return new PointF(point.x, point.y);
     }
 
+    private void dispatchTap(
+            float x,
+            float y,
+            int token,
+            Runnable completed,
+            Runnable cancelled
+    ) {
+        if (!isCurrent(token)) {
+            return;
+        }
+        service.dispatchAutoTap(
+                x,
+                y,
+                new GestureAccessibilityService.AutoTapCallback() {
+                    @Override
+                    public void onCompleted() {
+                        if (isCurrent(token)) {
+                            completed.run();
+                        }
+                    }
+
+                    @Override
+                    public void onCancelled() {
+                        if (isCurrent(token)) {
+                            service.autoStatus(
+                                    "點擊被取消，未當成成功動作"
+                            );
+                            cancelled.run();
+                        }
+                    }
+                }
+        );
+    }
+
     private void takeScreenshot(int token, BitmapReceiver receiver) {
         if (!isCurrent(token)) {
             return;
@@ -890,11 +1031,13 @@ final class AutoPilotController {
                             service.autoStatus(
                                     "發現移動速度警告，按下「我不是駕駛」"
                             );
-                            service.dispatchAutoTap(
+                            dispatchTap(
                                     drivingButton.x,
                                     drivingButton.y,
+                                    token,
                                     AutoPilotController.this
-                                            ::onDrivingPromptConfirmed
+                                            ::onDrivingPromptConfirmed,
+                                    () -> scheduleCycle(500L, token)
                             );
                             return;
                         }
