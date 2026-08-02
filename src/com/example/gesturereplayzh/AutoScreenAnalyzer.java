@@ -118,28 +118,25 @@ final class AutoScreenAnalyzer {
             Bitmap bitmap,
             FrameSignature mapBeforeTap
     ) {
-        // A stable map has the small menu ball plus at least one map HUD
-        // anchor.  Check it before encounter controls: dense maps can contain
-        // white shapes in every encounter control region.
-        if (looksLikeMapScreen(bitmap)) {
-            return ScreenState.MAP_RETURNED;
-        }
+        // The flee icon is the sole encounter signal.  It must be checked
+        // before the map: the large throw ball and two lower encounter buttons
+        // can otherwise resemble the map menu and side controls.
         if (looksLikeEncounterReady(bitmap)) {
             return ScreenState.ENCOUNTER;
-        }
-        if (looksLikeEncounterContext(bitmap)) {
-            return ScreenState.ENCOUNTER_WAIT;
-        }
-        if (mapBeforeTap != null &&
-                mapBeforeTap.distance(new FrameSignature(bitmap)) < 0.105f &&
-                looksLikeMapScreenRelaxed(bitmap)) {
-            return ScreenState.MAP_RETURNED;
         }
         if (looksLikeRocketDialog(bitmap)) {
             return ScreenState.ROCKET_DIALOG;
         }
         if (looksLikeCloseButton(bitmap)) {
             return ScreenState.HAS_CLOSE_BUTTON;
+        }
+        if (looksLikeMapScreen(bitmap)) {
+            return ScreenState.MAP_RETURNED;
+        }
+        if (mapBeforeTap != null &&
+                mapBeforeTap.distance(new FrameSignature(bitmap)) < 0.105f &&
+                looksLikeMapScreenRelaxed(bitmap)) {
+            return ScreenState.MAP_RETURNED;
         }
         return ScreenState.UNKNOWN;
     }
@@ -437,6 +434,7 @@ final class AutoScreenAnalyzer {
         // sees one whole silhouette. Without this, a rotating fragment of a
         // PokéStop or Gym can look like a Pokémon-sized independent object.
         boolean[] joinedMotion = dilate(rawMotion, columns, rows, 1);
+        boolean[] continuityMotion = dilate(rawMotion, columns, rows, 3);
         List<Component> components = components(
                 joinedMotion,
                 rawMotion,
@@ -458,7 +456,13 @@ final class AutoScreenAnalyzer {
                     height,
                     blockedPoints,
                     threshold,
-                    fastRecall
+                    fastRecall,
+                    isPartOfExtendedMotionNetwork(
+                            component,
+                            continuityMotion,
+                            columns,
+                            rows
+                    )
             );
             if (candidate == null) {
                 continue;
@@ -549,7 +553,8 @@ final class AutoScreenAnalyzer {
             int height,
             List<PointF> blockedPoints,
             int threshold,
-            boolean fastRecall
+            boolean fastRecall,
+            boolean extendedBackgroundNetwork
     ) {
         if (component.activeCells < 2) {
             return null;
@@ -671,7 +676,8 @@ final class AutoScreenAnalyzer {
                 local.yellowGreenRatio > 0.43f &&
                         (compactness < 0.48f || elongation > 1.65f) &&
                         local.shadowRatio < 0.16f;
-        if (flatTerrain || thinBoundary || yellowGreenBoundary) {
+        if (flatTerrain || thinBoundary || yellowGreenBoundary ||
+                extendedBackgroundNetwork) {
             return null;
         }
 
@@ -1090,6 +1096,89 @@ final class AutoScreenAnalyzer {
         return result;
     }
 
+    private static boolean isPartOfExtendedMotionNetwork(
+            Component candidate,
+            boolean[] bridgedMotion,
+            int columns,
+            int rows
+    ) {
+        if (candidate.activeCells < 2 ||
+                candidate.minColumn > candidate.maxColumn ||
+                candidate.minRow > candidate.maxRow) {
+            return false;
+        }
+        int seed = -1;
+        for (int row = candidate.minRow;
+             row <= candidate.maxRow && seed < 0;
+             row++) {
+            for (int column = candidate.minColumn;
+                 column <= candidate.maxColumn;
+                 column++) {
+                int index = row * columns + column;
+                if (bridgedMotion[index]) {
+                    seed = index;
+                    break;
+                }
+            }
+        }
+        if (seed < 0) {
+            return false;
+        }
+
+        boolean[] visited = new boolean[bridgedMotion.length];
+        ArrayDeque<Integer> queue = new ArrayDeque<>();
+        queue.add(seed);
+        visited[seed] = true;
+        int networkCells = 0;
+        int minColumn = columns;
+        int maxColumn = 0;
+        int minRow = rows;
+        int maxRow = 0;
+        while (!queue.isEmpty()) {
+            int current = queue.removeFirst();
+            int row = current / columns;
+            int column = current % columns;
+            networkCells++;
+            minColumn = Math.min(minColumn, column);
+            maxColumn = Math.max(maxColumn, column);
+            minRow = Math.min(minRow, row);
+            maxRow = Math.max(maxRow, row);
+            for (int dy = -1; dy <= 1; dy++) {
+                for (int dx = -1; dx <= 1; dx++) {
+                    int x = column + dx;
+                    int y = row + dy;
+                    if (x < 0 || y < 0 || x >= columns || y >= rows) {
+                        continue;
+                    }
+                    int next = y * columns + x;
+                    if (bridgedMotion[next] && !visited[next]) {
+                        visited[next] = true;
+                        queue.add(next);
+                    }
+                }
+            }
+        }
+
+        int candidateWidth = candidate.maxColumn - candidate.minColumn + 1;
+        int candidateHeight = candidate.maxRow - candidate.minRow + 1;
+        int networkWidth = maxColumn - minColumn + 1;
+        int networkHeight = maxRow - minRow + 1;
+        boolean growsBeyondCandidate =
+                networkWidth >= candidateWidth + Math.max(5, candidateWidth) ||
+                        networkHeight >= candidateHeight +
+                                Math.max(5, candidateHeight);
+        boolean crossesLargeMapSpan =
+                networkWidth >= Math.max(12, Math.round(columns * 0.16f)) ||
+                        networkHeight >= Math.max(12, Math.round(rows * 0.12f));
+        float networkElongation = Math.max(networkWidth, networkHeight) /
+                (float) Math.max(1, Math.min(networkWidth, networkHeight));
+        boolean roadLikeNetwork =
+                networkElongation >= 1.75f ||
+                        networkCells >= Math.max(45, candidate.activeCells * 5);
+        return growsBeyondCandidate && crossesLargeMapSpan &&
+                roadLikeNetwork;
+    }
+
     private static List<Component> components(
             boolean[] joined,
             boolean[] raw,
@@ -1204,13 +1293,7 @@ final class AutoScreenAnalyzer {
     }
 
     private static boolean looksLikeEncounterReady(Bitmap bitmap) {
-        float circleScore = findEncounterBallCircleScore(bitmap);
-
-        // Ball colour is deliberately not fixed: normal, Great, Ultra and
-        // Master Balls all differ.  Readiness is the encounter HUD plus a
-        // large circular ball at the lower centre.
-        return looksLikeEncounterContext(bitmap) &&
-                circleScore >= 0.28f;
+        return looksLikeFleeIcon(bitmap);
     }
 
     private static boolean looksLikeCloseButton(Bitmap bitmap) {
@@ -1274,37 +1357,165 @@ final class AutoScreenAnalyzer {
     }
 
     private static boolean looksLikeEncounterContext(Bitmap bitmap) {
-        RegionStats runControl =
-                stats(bitmap, 0.02f, 0.035f, 0.18f, 0.15f);
-        RegionStats leftButton =
-                stats(bitmap, 0.03f, 0.82f, 0.23f, 0.98f);
-        RegionStats rightButton =
-                stats(bitmap, 0.77f, 0.82f, 0.97f, 0.98f);
-        boolean runAnchor =
-                runControl.whiteRatio > 0.009f &&
-                        runControl.edgeRatio > 0.038f;
-        boolean captureDocks =
-                leftButton.edgeRatio > 0.045f &&
-                        rightButton.edgeRatio > 0.045f &&
-                        (
-                                leftButton.darkRatio > 0.20f ||
-                                        leftButton.whiteRatio > 0.003f
-                        ) &&
-                        (
-                                rightButton.darkRatio > 0.20f ||
-                                        rightButton.whiteRatio > 0.003f
-                        );
-        return runAnchor && captureDocks;
+        return looksLikeFleeIcon(bitmap);
     }
 
     private static boolean looksLikeCaptureAnimation(Bitmap bitmap) {
-        RegionStats leftButton =
-                stats(bitmap, 0.03f, 0.82f, 0.23f, 0.98f);
-        RegionStats rightButton =
-                stats(bitmap, 0.77f, 0.82f, 0.97f, 0.98f);
-        return leftButton.edgeRatio > 0.045f &&
-                rightButton.edgeRatio > 0.045f &&
-                findEncounterBallCircleScore(bitmap) >= 0.35f;
+        return looksLikeFleeIcon(bitmap);
+    }
+
+    private static boolean looksLikeFleeIcon(Bitmap bitmap) {
+        int width = bitmap.getWidth();
+        int height = bitmap.getHeight();
+        int step = Math.max(1, width / 360);
+        int left = Math.round(width * 0.025f);
+        int right = Math.round(width * 0.18f);
+        int top = Math.round(height * 0.052f);
+        int bottom = Math.round(height * 0.15f);
+        int columns = Math.max(1, (right - left) / step);
+        int rows = Math.max(1, (bottom - top) / step);
+        boolean[] bright = new boolean[columns * rows];
+        for (int row = 0; row < rows; row++) {
+            int y = Math.min(height - 1, top + row * step);
+            for (int column = 0; column < columns; column++) {
+                int x = Math.min(width - 1, left + column * step);
+                int color = bitmap.getPixel(x, y);
+                int red = Color.red(color);
+                int green = Color.green(color);
+                int blue = Color.blue(color);
+                int maximum = Math.max(red, Math.max(green, blue));
+                int minimum = Math.min(red, Math.min(green, blue));
+                bright[row * columns + column] =
+                        minimum >= 160 && maximum - minimum <= 95;
+            }
+        }
+
+        boolean[] visited = new boolean[bright.length];
+        ArrayDeque<Integer> queue = new ArrayDeque<>();
+        for (int index = 0; index < bright.length; index++) {
+            if (!bright[index] || visited[index]) {
+                continue;
+            }
+            int count = 0;
+            int minColumn = columns;
+            int maxColumn = 0;
+            int minRow = rows;
+            int maxRow = 0;
+            int[] verticalBands = new int[3];
+            visited[index] = true;
+            queue.add(index);
+            List<Integer> pixels = new ArrayList<>();
+            while (!queue.isEmpty()) {
+                int current = queue.removeFirst();
+                pixels.add(current);
+                int row = current / columns;
+                int column = current % columns;
+                count++;
+                minColumn = Math.min(minColumn, column);
+                maxColumn = Math.max(maxColumn, column);
+                minRow = Math.min(minRow, row);
+                maxRow = Math.max(maxRow, row);
+                for (int dy = -1; dy <= 1; dy++) {
+                    for (int dx = -1; dx <= 1; dx++) {
+                        int x = column + dx;
+                        int y = row + dy;
+                        if (x < 0 || y < 0 || x >= columns || y >= rows) {
+                            continue;
+                        }
+                        int next = y * columns + x;
+                        if (bright[next] && !visited[next]) {
+                            visited[next] = true;
+                            queue.add(next);
+                        }
+                    }
+                }
+            }
+            int componentWidth = (maxColumn - minColumn + 1) * step;
+            int componentHeight = (maxRow - minRow + 1) * step;
+            float widthRatio = componentWidth / (float) width;
+            float heightRatio = componentHeight / (float) height;
+            float aspect = componentHeight /
+                    (float) Math.max(1, componentWidth);
+            float fill = count /
+                    (float) Math.max(
+                            1,
+                            (maxColumn - minColumn + 1) *
+                                    (maxRow - minRow + 1)
+                    );
+            boolean touchesSearchEdge =
+                    minColumn == 0 || minRow == 0 ||
+                            maxColumn == columns - 1 || maxRow == rows - 1;
+            if (touchesSearchEdge || widthRatio < 0.032f ||
+                    widthRatio > 0.115f || heightRatio < 0.025f ||
+                    heightRatio > 0.095f || aspect < 0.65f ||
+                    aspect > 2.40f || fill < 0.075f || fill > 0.62f) {
+                continue;
+            }
+            int componentRows = Math.max(1, maxRow - minRow + 1);
+            for (int pixel : pixels) {
+                int row = pixel / columns;
+                int band = Math.min(
+                        2,
+                        (row - minRow) * 3 / componentRows
+                );
+                verticalBands[band]++;
+            }
+            if (verticalBands[0] >= Math.max(2, count / 18) &&
+                    verticalBands[1] >= Math.max(2, count / 12) &&
+                    verticalBands[2] >= Math.max(2, count / 18)) {
+                return true;
+            }
+        }
+        // Some phones draw the same flee icon as translucent gray. In that
+        // case it merges with a bright sky and is not a standalone bright
+        // component, but its strokes still create a concentrated edge cluster
+        // at the icon's fixed, normalized position.
+        float iconEdges = edgeRatioInRegion(
+                bitmap,
+                0.050f,
+                0.058f,
+                0.145f,
+                0.125f,
+                28
+        );
+        float surroundingEdges = edgeRatioInRegion(
+                bitmap,
+                0.025f,
+                0.045f,
+                0.180f,
+                0.150f,
+                28
+        );
+        return iconEdges >= 0.12f &&
+                iconEdges - surroundingEdges >= 0.065f;
+    }
+
+    private static float edgeRatioInRegion(
+            Bitmap bitmap,
+            float leftRatio,
+            float topRatio,
+            float rightRatio,
+            float bottomRatio,
+            int threshold
+    ) {
+        int width = bitmap.getWidth();
+        int height = bitmap.getHeight();
+        int left = Math.max(1, Math.round(width * leftRatio));
+        int top = Math.max(1, Math.round(height * topRatio));
+        int right = Math.min(width - 2, Math.round(width * rightRatio));
+        int bottom = Math.min(height - 2, Math.round(height * bottomRatio));
+        int step = Math.max(1, Math.min(width, height) / 360);
+        int samples = 0;
+        int edges = 0;
+        for (int y = top; y <= bottom; y += step) {
+            for (int x = left; x <= right; x += step) {
+                samples++;
+                if (edgeStrength(bitmap, x, y, step) > threshold) {
+                    edges++;
+                }
+            }
+        }
+        return edges / (float) Math.max(1, samples);
     }
 
     private static float findMapMenuBallCircleScore(Bitmap bitmap) {

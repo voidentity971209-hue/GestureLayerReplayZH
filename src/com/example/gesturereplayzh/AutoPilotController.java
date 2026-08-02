@@ -21,7 +21,7 @@ final class AutoPilotController {
     private static final long MIN_SCREENSHOT_INTERVAL_MS = 100L;
     private static final long POST_TAP_CLASSIFY_DELAY_MS = 450L;
     private static final long OPEN_SCREEN_POLL_MS = 180L;
-    private static final int MAX_OPEN_SCREEN_POLLS = 5;
+    private static final int MAX_OPEN_SCREEN_POLLS = 12;
     private static final int REQUIRED_ENCOUNTER_POLLS = 1;
     private static final int MAX_CATCH_RETRIES = 2;
     private static final long CATCH_RETRY_DELAY_MS = 900L;
@@ -134,14 +134,18 @@ final class AutoPilotController {
                     PointF currentClose =
                             AutoScreenAnalyzer.findCloseButton(bitmap);
                     recycle(bitmap);
+                    if (currentClose == null) {
+                        service.autoStatus("等待實際下方 X 出現，不執行盲點");
+                        handler.postDelayed(
+                                () -> inspectCurrentScreen(token, 0, 0),
+                                OPEN_SCREEN_POLL_MS
+                        );
+                        break;
+                    }
                     service.autoStatus(settings.exitDescription);
                     service.dispatchAutoTap(
-                            currentClose == null
-                                    ? width * settings.exitXRatio
-                                    : currentClose.x,
-                            currentClose == null
-                                    ? height * settings.exitYRatio
-                                    : currentClose.y,
+                            currentClose.x,
+                            currentClose.y,
                             () -> scheduleCycle(settings.afterExitMs, token)
                     );
                     break;
@@ -397,18 +401,26 @@ final class AutoPilotController {
                     int height = bitmap.getHeight();
                     PointF openedClose =
                             AutoScreenAnalyzer.findCloseButton(bitmap);
+                    if (openedClose == null) {
+                        recycle(bitmap);
+                        service.autoStatus("設施畫面尚未出現可確認的 X，繼續等待");
+                        pollOpenedScreen(
+                                token,
+                                pollCount,
+                                0,
+                                0,
+                                0
+                        );
+                        break;
+                    }
                     completeModelEvent(bitmap, "facility_or_close", settings);
                     recycle(bitmap);
                     mapBeforeTap = null;
                     blockLastTarget();
                     service.autoStatus(settings.exitDescription);
                     service.dispatchAutoTap(
-                            openedClose == null
-                                    ? width * settings.exitXRatio
-                                    : openedClose.x,
-                            openedClose == null
-                                    ? height * settings.exitYRatio
-                                    : openedClose.y,
+                            openedClose.x,
+                            openedClose.y,
                             () -> scheduleCycle(settings.afterExitMs, token)
                     );
                     break;
@@ -429,16 +441,11 @@ final class AutoPilotController {
                         mapBeforeTap = null;
                         blockLastTarget();
                         service.autoStatus(
-                                "未確認捕捉畫面，立即嘗試返回並繼續快掃"
+                                "未確認畫面；不盲點任何位置，稍後重新辨識"
                         );
-                        PointF size = screenSize();
-                        service.dispatchAutoTap(
-                                size.x * settings.exitXRatio,
-                                size.y * settings.exitYRatio,
-                                () -> scheduleCycle(
-                                        Math.min(300L, settings.afterExitMs),
-                                        token
-                                )
+                        handler.postDelayed(
+                                () -> inspectCurrentScreen(token, 0, 0),
+                                Math.max(300L, settings.afterExitMs)
                         );
                     } else {
                         recycle(bitmap);
@@ -464,7 +471,11 @@ final class AutoPilotController {
     ) {
         if (pollCount + 1 >= MAX_OPEN_SCREEN_POLLS) {
             blockLastTarget();
-            scheduleCycle(AutoSettings.load(service).scanIntervalMs, token);
+            service.autoStatus("畫面仍未確定，不盲點並重新辨識目前畫面");
+            handler.postDelayed(
+                    () -> inspectCurrentScreen(token, 0, 0),
+                    OPEN_SCREEN_POLL_MS
+            );
             return;
         }
         handler.postDelayed(
@@ -489,13 +500,17 @@ final class AutoPilotController {
             takeScreenshot(token, bitmap -> {
                 PointF close = AutoScreenAnalyzer.findCloseButton(bitmap);
                 recycle(bitmap);
+                if (close == null) {
+                    service.autoStatus("等待火箭隊畫面的實際 X 出現");
+                    handler.postDelayed(
+                            () -> runRocketTap(token, completedTaps),
+                            OPEN_SCREEN_POLL_MS
+                    );
+                    return;
+                }
                 service.dispatchAutoTap(
-                        close == null
-                                ? screen.x * settings.exitXRatio
-                                : close.x,
-                        close == null
-                                ? screen.y * settings.exitYRatio
-                                : close.y,
+                        close.x,
+                        close.y,
                         () -> scheduleCycle(settings.afterExitMs, token)
                 );
             });
@@ -522,11 +537,10 @@ final class AutoPilotController {
             );
             return;
         }
-        List<GestureLayer> catchLayers =
-                AutoCatchGestureStore.load(service);
+        List<GestureLayer> catchLayers = GestureStore.load(service);
         if (catchLayers.isEmpty()) {
             service.autoStatus(
-                    "尚未套用全自動捕捉手勢，請回主畫面按「套用目前手勢至全自動」"
+                    "目前手勢沒有可播放軌跡，請先錄製或套用保存版本"
             );
             stop();
             return;
@@ -534,7 +548,7 @@ final class AutoPilotController {
         handler.removeCallbacksAndMessages(null);
         Log.i(
                 LOG_TAG,
-                "catch-dispatch source=snapshot layers=" + catchLayers.size() +
+                "catch-dispatch source=current layers=" + catchLayers.size() +
                         " fingerprint=" +
                         GestureIdentity.fingerprint(catchLayers)
         );

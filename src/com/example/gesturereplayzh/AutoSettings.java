@@ -250,9 +250,9 @@ final class AutoSettings {
     private static AutoSettings defaults() {
         AutoSettings settings = new AutoSettings();
         settings.scanDescription = "三幀快速掃描：優先點擊小型獨立寶可夢候選";
-        settings.encounterDescription = "確認捕捉畫面後播放目前套用的捕捉手勢";
+        settings.encounterDescription = "只以左上角逃跑圖示確認捕捉畫面，播放目前手勢";
         settings.rocketDescription = "火箭隊對話點擊兩次，每次相隔 0.6 秒，再退出";
-        settings.exitDescription = "非捕捉畫面等待後按下方 X 返回地圖";
+        settings.exitDescription = "非捕捉畫面只在偵測到實際下方 X 後返回地圖";
         settings.scanIntervalMs = 200L;
         settings.rocketTapIntervalMs = 600L;
         settings.beforeCatchMs = 700L;
