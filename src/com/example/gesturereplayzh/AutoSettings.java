@@ -5,22 +5,23 @@ import android.content.SharedPreferences;
 
 final class AutoSettings {
     private static final String PREFS = "auto_operation_settings";
-    private static final String V7_TIMING_MIGRATED = "v7_timing_migrated";
-    private static final String V10_PHONE_PROFILE_MIGRATED =
-            "v10_phone_profile_migrated";
     static final String CURRENT_GESTURE_SOURCE = "current";
-    static final int DETECTOR_LEGACY = 0;
-    static final int DETECTOR_MODEL_VERIFY = 2;
 
     String scanDescription;
     String encounterDescription;
     String rocketDescription;
     String exitDescription;
     long scanIntervalMs;
+    int recognitionFrameCount;
+    int listTapCount;
+    long listTapIntervalMs;
+    long postTapClassifyDelayMs;
     long rocketTapIntervalMs;
     long beforeCatchMs;
     long afterCatchMs;
     long afterExitMs;
+    long groundMoveWaitMs;
+    int groundMoveRetries;
     int rocketTapCount;
     float rocketTapXRatio;
     float rocketTapYRatio;
@@ -28,17 +29,6 @@ final class AutoSettings {
     float exitYRatio;
     String catchGestureSourceId;
     boolean autoEnabled;
-    boolean pokemonOnlyMode;
-    int detectorMode;
-    float modelConfidenceThreshold;
-    int modelMaxResults;
-    int modelThreads;
-    boolean collectModelEvents;
-    int dataLimitMb;
-    int positiveSamplePercent;
-    int recognitionFrameCount;
-    int legacySensitivity;
-    float scanRadiusRatio;
     long unknownTimeoutMs;
     long closeTimeoutMs;
     boolean allowFallbackExit;
@@ -47,373 +37,130 @@ final class AutoSettings {
     int blockedMaxCount;
 
     static AutoSettings load(Context context) {
-        SharedPreferences values =
-                context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        AutoSettings settings = defaults();
-        settings.scanDescription = values.getString(
-                "scanDescription",
-                settings.scanDescription
-        );
-        settings.encounterDescription = values.getString(
-                "encounterDescription",
-                settings.encounterDescription
-        );
-        settings.rocketDescription = values.getString(
-                "rocketDescription",
-                settings.rocketDescription
-        );
-        settings.exitDescription = values.getString(
-                "exitDescription",
-                settings.exitDescription
-        );
-        settings.scanIntervalMs = readTime(
-                values,
-                "scanIntervalMs",
-                settings.scanIntervalMs
-        );
-        settings.rocketTapIntervalMs = readTime(
-                values,
-                "rocketTapIntervalMs",
-                settings.rocketTapIntervalMs
-        );
-        settings.beforeCatchMs = readTime(
-                values,
-                "beforeCatchMs",
-                settings.beforeCatchMs
-        );
-        settings.afterCatchMs = readTime(
-                values,
-                "afterCatchMs",
-                settings.afterCatchMs
-        );
-        settings.afterExitMs = readTime(
-                values,
-                "afterExitMs",
-                settings.afterExitMs
-        );
-        settings.rocketTapCount = Math.max(
-                1,
-                Math.min(5, values.getInt("rocketTapCount", settings.rocketTapCount))
-        );
-        settings.rocketTapXRatio = readRatio(
-                values,
-                "rocketTapXRatio",
-                settings.rocketTapXRatio
-        );
-        settings.rocketTapYRatio = readRatio(
-                values,
-                "rocketTapYRatio",
-                settings.rocketTapYRatio
-        );
-        settings.exitXRatio = readRatio(
-                values,
-                "exitXRatio",
-                settings.exitXRatio
-        );
-        settings.exitYRatio = readRatio(
-                values,
-                "exitYRatio",
-                settings.exitYRatio
-        );
-        settings.catchGestureSourceId = values.getString(
-                "catchGestureSourceId",
-                settings.catchGestureSourceId
-        );
-        settings.autoEnabled = values.getBoolean(
-                "autoEnabled",
-                settings.autoEnabled
-        );
-        settings.pokemonOnlyMode = values.getBoolean(
-                "pokemonOnlyMode",
-                settings.pokemonOnlyMode
-        );
-        settings.detectorMode = Math.max(
-                DETECTOR_LEGACY,
-                Math.min(
-                        DETECTOR_MODEL_VERIFY,
-                        values.getInt("detectorMode", settings.detectorMode)
-                )
-        );
-        // Version 0.15 stored the removed preview option as value 1.
-        if (settings.detectorMode == 1) {
-            settings.detectorMode = DETECTOR_LEGACY;
-        }
-        settings.modelConfidenceThreshold = Math.max(
-                0.05f,
-                Math.min(
-                        0.95f,
-                        values.getFloat(
-                                "modelConfidenceThreshold",
-                                settings.modelConfidenceThreshold
-                        )
-                )
-        );
-        settings.modelMaxResults = Math.max(
-                1,
-                Math.min(
-                        20,
-                        values.getInt(
-                                "modelMaxResults",
-                                settings.modelMaxResults
-                        )
-                )
-        );
-        settings.modelThreads = Math.max(
-                1,
-                Math.min(
-                        8,
-                        values.getInt("modelThreads", settings.modelThreads)
-                )
-        );
-        settings.collectModelEvents = values.getBoolean(
-                "collectModelEvents",
-                settings.collectModelEvents
-        );
-        settings.dataLimitMb = Math.max(
-                50,
-                Math.min(
-                        5000,
-                        values.getInt("dataLimitMb", settings.dataLimitMb)
-                )
-        );
-        settings.positiveSamplePercent = Math.max(
-                0,
-                Math.min(
-                        100,
-                        values.getInt(
-                                "positiveSamplePercent",
-                                settings.positiveSamplePercent
-                        )
-                )
-        );
-        settings.recognitionFrameCount = Math.max(
-                1,
-                Math.min(
-                        5,
-                        values.getInt(
-                                "recognitionFrameCount",
-                                settings.recognitionFrameCount
-                        )
-                )
-        );
-        settings.legacySensitivity = Math.max(
-                0,
-                Math.min(
-                        2,
-                        values.getInt(
-                                "legacySensitivity",
-                                settings.legacySensitivity
-                        )
-                )
-        );
-        settings.scanRadiusRatio = Math.max(
-                0.15f,
-                Math.min(
-                        0.40f,
-                        values.getFloat(
-                                "scanRadiusRatio",
-                                settings.scanRadiusRatio
-                        )
-                )
-        );
-        settings.unknownTimeoutMs = readTime(
-                values,
-                "unknownTimeoutMs",
-                settings.unknownTimeoutMs
-        );
-        settings.closeTimeoutMs = readTime(
-                values,
-                "closeTimeoutMs",
-                settings.closeTimeoutMs
-        );
-        settings.allowFallbackExit = values.getBoolean(
-                "allowFallbackExit",
-                settings.allowFallbackExit
-        );
-        settings.blockedDurationMs = readTime(
-                values,
-                "blockedDurationMs",
-                settings.blockedDurationMs
-        );
-        settings.blockedRadiusRatio = Math.max(
-                0.01f,
-                Math.min(
-                        0.20f,
-                        values.getFloat(
-                                "blockedRadiusRatio",
-                                settings.blockedRadiusRatio
-                        )
-                )
-        );
-        settings.blockedMaxCount = Math.max(
-                1,
-                Math.min(
-                        200,
-                        values.getInt(
-                                "blockedMaxCount",
-                                settings.blockedMaxCount
-                        )
-                )
-        );
-        if (!values.getBoolean(V7_TIMING_MIGRATED, false)) {
-            if (settings.scanIntervalMs == 800L) {
-                settings.scanIntervalMs = 300L;
-            }
-            if (settings.beforeCatchMs == 300L) {
-                settings.beforeCatchMs = 700L;
-            }
-            values.edit()
-                    .putLong("scanIntervalMs", settings.scanIntervalMs)
-                    .putLong("beforeCatchMs", settings.beforeCatchMs)
-                    .putBoolean(V7_TIMING_MIGRATED, true)
-                    .apply();
-        }
-        if (!values.getBoolean(V10_PHONE_PROFILE_MIGRATED, false)) {
-            if (settings.afterCatchMs == 6500L) {
-                settings.afterCatchMs = 1200L;
-            }
-            values.edit()
-                    .putLong("afterCatchMs", settings.afterCatchMs)
-                    .putBoolean(V10_PHONE_PROFILE_MIGRATED, true)
-                    .apply();
-        }
-        return settings;
+        SharedPreferences p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        AutoSettings s = defaults();
+        s.scanDescription = p.getString("scanDescription", s.scanDescription);
+        s.encounterDescription = p.getString("encounterDescription", s.encounterDescription);
+        s.rocketDescription = p.getString("rocketDescription", s.rocketDescription);
+        s.exitDescription = p.getString("exitDescription", s.exitDescription);
+        s.scanIntervalMs = readTime(p, "scanIntervalMs", s.scanIntervalMs);
+        s.recognitionFrameCount = clamp(p.getInt("recognitionFrameCount", s.recognitionFrameCount), 1, 5);
+        s.listTapCount = clamp(p.getInt("listTapCount", s.listTapCount), 1, 4);
+        s.listTapIntervalMs = readTime(p, "listTapIntervalMs", s.listTapIntervalMs);
+        s.postTapClassifyDelayMs = readTime(p, "postTapClassifyDelayMs", s.postTapClassifyDelayMs);
+        s.rocketTapIntervalMs = readTime(p, "rocketTapIntervalMs", s.rocketTapIntervalMs);
+        s.beforeCatchMs = readTime(p, "beforeCatchMs", s.beforeCatchMs);
+        s.afterCatchMs = readTime(p, "afterCatchMs", s.afterCatchMs);
+        s.afterExitMs = readTime(p, "afterExitMs", s.afterExitMs);
+        s.groundMoveWaitMs = readTime(p, "groundMoveWaitMs", s.groundMoveWaitMs);
+        s.groundMoveRetries = clamp(p.getInt("groundMoveRetries", s.groundMoveRetries), 1, 8);
+        s.rocketTapCount = clamp(p.getInt("rocketTapCount", s.rocketTapCount), 1, 5);
+        s.rocketTapXRatio = readRatio(p, "rocketTapXRatio", s.rocketTapXRatio);
+        s.rocketTapYRatio = readRatio(p, "rocketTapYRatio", s.rocketTapYRatio);
+        s.exitXRatio = readRatio(p, "exitXRatio", s.exitXRatio);
+        s.exitYRatio = readRatio(p, "exitYRatio", s.exitYRatio);
+        s.catchGestureSourceId = CURRENT_GESTURE_SOURCE;
+        s.autoEnabled = p.getBoolean("autoEnabled", false);
+        s.unknownTimeoutMs = readTime(p, "unknownTimeoutMs", s.unknownTimeoutMs);
+        s.closeTimeoutMs = readTime(p, "closeTimeoutMs", s.closeTimeoutMs);
+        s.allowFallbackExit = p.getBoolean("allowFallbackExit", false);
+        s.blockedDurationMs = readTime(p, "blockedDurationMs", s.blockedDurationMs);
+        s.blockedRadiusRatio = clamp(p.getFloat("blockedRadiusRatio", s.blockedRadiusRatio), .01f, .20f);
+        s.blockedMaxCount = clamp(p.getInt("blockedMaxCount", s.blockedMaxCount), 1, 200);
+        return s;
     }
 
     void save(Context context) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                .edit()
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
                 .putString("scanDescription", scanDescription)
                 .putString("encounterDescription", encounterDescription)
                 .putString("rocketDescription", rocketDescription)
                 .putString("exitDescription", exitDescription)
                 .putLong("scanIntervalMs", normalizeTime(scanIntervalMs))
+                .putInt("recognitionFrameCount", clamp(recognitionFrameCount, 1, 5))
+                .putInt("listTapCount", clamp(listTapCount, 1, 4))
+                .putLong("listTapIntervalMs", normalizeTime(listTapIntervalMs))
+                .putLong("postTapClassifyDelayMs", normalizeTime(postTapClassifyDelayMs))
                 .putLong("rocketTapIntervalMs", normalizeTime(rocketTapIntervalMs))
                 .putLong("beforeCatchMs", normalizeTime(beforeCatchMs))
                 .putLong("afterCatchMs", normalizeTime(afterCatchMs))
                 .putLong("afterExitMs", normalizeTime(afterExitMs))
-                .putInt("rocketTapCount", Math.max(1, Math.min(5, rocketTapCount)))
+                .putLong("groundMoveWaitMs", normalizeTime(groundMoveWaitMs))
+                .putInt("groundMoveRetries", clamp(groundMoveRetries, 1, 8))
+                .putInt("rocketTapCount", clamp(rocketTapCount, 1, 5))
                 .putFloat("rocketTapXRatio", normalizeRatio(rocketTapXRatio))
                 .putFloat("rocketTapYRatio", normalizeRatio(rocketTapYRatio))
                 .putFloat("exitXRatio", normalizeRatio(exitXRatio))
                 .putFloat("exitYRatio", normalizeRatio(exitYRatio))
-                .putString(
-                        "catchGestureSourceId",
-                        catchGestureSourceId == null
-                                ? CURRENT_GESTURE_SOURCE
-                                : catchGestureSourceId
-                )
+                .putString("catchGestureSourceId", CURRENT_GESTURE_SOURCE)
                 .putBoolean("autoEnabled", autoEnabled)
-                .putBoolean("pokemonOnlyMode", pokemonOnlyMode)
-                .putInt("detectorMode", detectorMode)
-                .putFloat(
-                        "modelConfidenceThreshold",
-                        modelConfidenceThreshold
-                )
-                .putInt("modelMaxResults", modelMaxResults)
-                .putInt("modelThreads", modelThreads)
-                .putBoolean("collectModelEvents", collectModelEvents)
-                .putInt("dataLimitMb", dataLimitMb)
-                .putInt("positiveSamplePercent", positiveSamplePercent)
-                .putInt(
-                        "recognitionFrameCount",
-                        Math.max(1, Math.min(5, recognitionFrameCount))
-                )
-                .putInt(
-                        "legacySensitivity",
-                        Math.max(0, Math.min(2, legacySensitivity))
-                )
-                .putFloat(
-                        "scanRadiusRatio",
-                        Math.max(0.15f, Math.min(0.40f, scanRadiusRatio))
-                )
                 .putLong("unknownTimeoutMs", normalizeTime(unknownTimeoutMs))
                 .putLong("closeTimeoutMs", normalizeTime(closeTimeoutMs))
                 .putBoolean("allowFallbackExit", allowFallbackExit)
-                .putLong(
-                        "blockedDurationMs",
-                        normalizeTime(blockedDurationMs)
-                )
-                .putFloat(
-                        "blockedRadiusRatio",
-                        Math.max(
-                                0.01f,
-                                Math.min(0.20f, blockedRadiusRatio)
-                        )
-                )
-                .putInt(
-                        "blockedMaxCount",
-                        Math.max(1, Math.min(200, blockedMaxCount))
-                )
+                .putLong("blockedDurationMs", normalizeTime(blockedDurationMs))
+                .putFloat("blockedRadiusRatio", clamp(blockedRadiusRatio, .01f, .20f))
+                .putInt("blockedMaxCount", clamp(blockedMaxCount, 1, 200))
                 .apply();
     }
 
     static void reset(Context context) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                .edit()
-                .clear()
-                .apply();
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().clear().apply();
     }
 
     private static AutoSettings defaults() {
-        AutoSettings settings = new AutoSettings();
-        settings.scanDescription = "三幀快速掃描：優先點擊小型獨立寶可夢候選";
-        settings.encounterDescription = "逃跑圖示與左右下欄位成立，播放目前手勢";
-        settings.rocketDescription = "火箭隊對話點擊兩次，每次相隔 0.6 秒，再退出";
-        settings.exitDescription = "非捕捉畫面只在偵測到實際下方 X 後返回地圖";
-        settings.scanIntervalMs = 200L;
-        settings.rocketTapIntervalMs = 600L;
-        settings.beforeCatchMs = 700L;
-        settings.afterCatchMs = 1200L;
-        settings.afterExitMs = 1000L;
-        settings.rocketTapCount = 2;
-        settings.rocketTapXRatio = 0.50f;
-        settings.rocketTapYRatio = 0.69f;
-        settings.exitXRatio = 0.50f;
-        settings.exitYRatio = 0.938f;
-        settings.catchGestureSourceId = CURRENT_GESTURE_SOURCE;
-        settings.autoEnabled = false;
-        settings.pokemonOnlyMode = true;
-        settings.detectorMode = DETECTOR_LEGACY;
-        settings.modelConfidenceThreshold = 0.45f;
-        settings.modelMaxResults = 8;
-        settings.modelThreads = 4;
-        settings.collectModelEvents = true;
-        settings.dataLimitMb = 500;
-        settings.positiveSamplePercent = 20;
-        settings.recognitionFrameCount = 1;
-        settings.legacySensitivity = 1;
-        settings.scanRadiusRatio = 0.38f;
-        settings.unknownTimeoutMs = 15000L;
-        settings.closeTimeoutMs = 10000L;
-        settings.allowFallbackExit = false;
-        settings.blockedDurationMs = 12000L;
-        settings.blockedRadiusRatio = 0.07f;
-        settings.blockedMaxCount = 40;
-        return settings;
+        AutoSettings s = new AutoSettings();
+        s.scanDescription = "全螢幕尋找 Pokémon 條列，逐項重新掃描";
+        s.encounterDescription = "以相機、名稱 CP、左右欄與中央球判定後播放目前手勢";
+        s.rocketDescription = "火箭隊對話後尋找下方 X 退出";
+        s.exitDescription = "只在辨識到真正 X 後退出，未知畫面不觸控";
+        s.scanIntervalMs = 300L;
+        s.recognitionFrameCount = 1;
+        s.listTapCount = 2;
+        s.listTapIntervalMs = 300L;
+        s.postTapClassifyDelayMs = 700L;
+        s.rocketTapIntervalMs = 600L;
+        s.beforeCatchMs = 700L;
+        s.afterCatchMs = 2000L;
+        s.afterExitMs = 1000L;
+        s.groundMoveWaitMs = 1200L;
+        s.groundMoveRetries = 4;
+        s.rocketTapCount = 2;
+        s.rocketTapXRatio = .50f;
+        s.rocketTapYRatio = .69f;
+        s.exitXRatio = .50f;
+        s.exitYRatio = .938f;
+        s.catchGestureSourceId = CURRENT_GESTURE_SOURCE;
+        s.autoEnabled = false;
+        s.unknownTimeoutMs = 15000L;
+        s.closeTimeoutMs = 10000L;
+        s.allowFallbackExit = false;
+        s.blockedDurationMs = 60000L;
+        s.blockedRadiusRatio = .07f;
+        s.blockedMaxCount = 40;
+        return s;
     }
 
-    private static long readTime(
-            SharedPreferences values,
-            String key,
-            long fallback
-    ) {
-        return normalizeTime(values.getLong(key, fallback));
+    private static long readTime(SharedPreferences p, String key, long fallback) {
+        return normalizeTime(p.getLong(key, fallback));
     }
 
     private static long normalizeTime(long value) {
         return Math.max(100L, Math.min(60000L, Math.round(value / 100f) * 100L));
     }
 
-    private static float readRatio(
-            SharedPreferences values,
-            String key,
-            float fallback
-    ) {
-        return normalizeRatio(values.getFloat(key, fallback));
+    private static float readRatio(SharedPreferences p, String key, float fallback) {
+        return normalizeRatio(p.getFloat(key, fallback));
     }
 
     private static float normalizeRatio(float value) {
-        return Math.max(0.02f, Math.min(0.98f, value));
+        return clamp(value, .02f, .98f);
+    }
+
+    private static int clamp(int value, int min, int max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    private static float clamp(float value, float min, float max) {
+        return Math.max(min, Math.min(max, value));
     }
 }

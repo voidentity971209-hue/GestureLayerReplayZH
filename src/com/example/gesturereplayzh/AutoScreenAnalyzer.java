@@ -36,31 +36,11 @@ final class AutoScreenAnalyzer {
         final TargetType type;
         final PointF point;
         final float confidence;
-        final RectF modelRoiBox;
-        final String modelLabel;
 
         TargetCandidate(TargetType type, PointF point, float confidence) {
-            this(type, point, confidence, null, null);
-        }
-
-        TargetCandidate(
-                TargetType type,
-                PointF point,
-                float confidence,
-                RectF modelRoiBox,
-                String modelLabel
-        ) {
             this.type = type;
             this.point = point;
             this.confidence = confidence;
-            this.modelRoiBox = modelRoiBox == null
-                    ? null
-                    : new RectF(modelRoiBox);
-            this.modelLabel = modelLabel;
-        }
-
-        boolean fromModel() {
-            return modelRoiBox != null && modelLabel != null;
         }
     }
 
@@ -118,9 +98,8 @@ final class AutoScreenAnalyzer {
             Bitmap bitmap,
             FrameSignature mapBeforeTap
     ) {
-        // A map also contains a running-person icon and lower controls.  Only
-        // accept an encounter when the flee icon, both side docks and the
-        // large central throw ball are present together.
+        // Do not use the flee/running icon: skins and versions move or replace
+        // it.  Encounter identity comes from the stable capture layout.
         if (looksLikeEncounterReady(bitmap)) {
             return ScreenState.ENCOUNTER;
         }
@@ -300,77 +279,6 @@ final class AutoScreenAnalyzer {
             }
         }
         return bestPokemon == null ? null : bestPokemon.asCandidate();
-    }
-
-    static float modelCandidateTemporalSupport(
-            List<Bitmap> frames,
-            RectF screenBox
-    ) {
-        if (frames.size() < 3) {
-            return 0f;
-        }
-        Bitmap first = frames.get(0);
-        Bitmap middle = frames.get(frames.size() / 2);
-        Bitmap last = frames.get(frames.size() - 1);
-        Bounds bounds = Bounds.forMap(middle.getWidth(), middle.getHeight());
-        Shift firstShift = estimateShift(middle, first, bounds);
-        Shift lastShift = estimateShift(middle, last, bounds);
-        int left = Math.max(bounds.left, Math.round(screenBox.left));
-        int top = Math.max(bounds.top, Math.round(screenBox.top));
-        int right = Math.min(bounds.right, Math.round(screenBox.right));
-        int bottom = Math.min(bounds.bottom, Math.round(screenBox.bottom));
-        if (right <= left || bottom <= top) {
-            return 0f;
-        }
-        TemporalStats temporal = temporalStats(
-                first,
-                middle,
-                last,
-                firstShift,
-                lastShift,
-                left,
-                top,
-                right,
-                bottom,
-                middle.getWidth()
-        );
-        return temporal.presentFrames < 2
-                ? 0f
-                : temporal.stability * 0.70f +
-                        temporal.edgeSimilarity * 0.30f;
-    }
-
-    static float modelCandidateBackgroundSupport(
-            Bitmap bitmap,
-            RectF screenBox
-    ) {
-        int width = bitmap.getWidth();
-        int height = bitmap.getHeight();
-        int left = Math.max(0, Math.round(screenBox.left));
-        int top = Math.max(0, Math.round(screenBox.top));
-        int right = Math.min(width, Math.round(screenBox.right));
-        int bottom = Math.min(height, Math.round(screenBox.bottom));
-        if (right <= left || bottom <= top) {
-            return 0f;
-        }
-        int horizontalMargin = Math.max(4, (right - left) / 2);
-        int verticalMargin = Math.max(4, (bottom - top) / 2);
-        VisualStats local = visualStats(bitmap, left, top, right, bottom);
-        VisualStats surrounding = visualStats(
-                bitmap,
-                Math.max(0, left - horizontalMargin),
-                Math.max(0, top - verticalMargin),
-                Math.min(width, right + horizontalMargin),
-                Math.min(height, bottom + verticalMargin)
-        );
-        return Math.min(
-                1f,
-                Math.max(
-                        0f,
-                        (local.edgeRatio - surrounding.edgeRatio * 0.45f) *
-                                4.2f
-                ) + Math.min(0.30f, local.shadowRatio * 1.8f)
-        );
     }
 
     private static List<TargetCandidate> findMapCandidatesInWindow(
@@ -1311,8 +1219,7 @@ final class AutoScreenAnalyzer {
     }
 
     private static boolean looksLikeEncounterReady(Bitmap bitmap) {
-        return looksLikeFleeIcon(bitmap) &&
-                looksLikeEncounterSideDocks(bitmap) &&
+        return looksLikeEncounterContext(bitmap) &&
                 findEncounterBallCircleScore(bitmap) >= 0.15f;
     }
 
@@ -1381,11 +1288,22 @@ final class AutoScreenAnalyzer {
     }
 
     private static boolean looksLikeEncounterContext(Bitmap bitmap) {
-        return looksLikeEncounterReady(bitmap);
+        RegionStats cameraControl =
+                stats(bitmap, 0.38f, 0.035f, 0.62f, 0.15f);
+        RegionStats cpPanel =
+                stats(bitmap, 0.16f, 0.24f, 0.84f, 0.44f);
+        boolean cameraAnchor = cameraControl.whiteRatio > 0.006f &&
+                cameraControl.edgeRatio > 0.035f;
+        boolean cpAnchor = cpPanel.whiteRatio > 0.004f &&
+                cpPanel.edgeRatio > 0.035f &&
+                (cpPanel.darkRatio > 0.025f || cpPanel.edgeRatio > 0.075f);
+        return cameraAnchor && cpAnchor &&
+                looksLikeEncounterSideDocks(bitmap) &&
+                !looksLikeMapScreenRelaxed(bitmap);
     }
 
     private static boolean looksLikeCaptureAnimation(Bitmap bitmap) {
-        return looksLikeFleeIcon(bitmap) &&
+        return looksLikeEncounterSideDocks(bitmap) &&
                 findEncounterBallCircleScore(bitmap) >= 0.08f;
     }
 
