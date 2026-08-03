@@ -28,7 +28,6 @@ final class AutoPilotController {
     private long lastScreenshotRequestAt;
     private long unknownStartedAt;
     private int groundIndex;
-    private long lastListToggleAt;
 
     AutoPilotController(GestureAccessibilityService service) {
         this.service = service;
@@ -47,7 +46,6 @@ final class AutoPilotController {
         blockedTargets.clear();
         groundIndex = 0;
         unknownStartedAt = 0L;
-        lastListToggleAt = 0L;
         service.autoStatus("自動流程已啟動：全螢幕搜尋 Pokémon 條列");
         schedule(400L, generation);
     }
@@ -156,22 +154,6 @@ final class AutoPilotController {
             PokemonListDetector.Result result
     ) {
         cleanupBlocked();
-        long now = System.currentTimeMillis();
-        if (result.foundPanel() && result.isCollapsed(bitmap.getWidth())) {
-            if (result.toggle != null && now - lastListToggleAt > 2500L) {
-                PointF toggle = result.toggle;
-                lastListToggleAt = now;
-                recycle(bitmap);
-                service.autoStatus("找到收合的 Pokémon 條列，先按＝展開");
-                tap(toggle.x, toggle.y, token,
-                        () -> schedule(AutoSettings.load(service).postTapClassifyDelayMs, token));
-            } else {
-                recycle(bitmap);
-                service.autoStatus("等待 Pokémon 條列展開");
-                schedule(AutoSettings.load(service).scanIntervalMs, token);
-            }
-            return;
-        }
         PointF target = null;
         for (PointF candidate : result.candidates) {
             if (!isBlocked(candidate, bitmap.getWidth())) {
@@ -195,7 +177,8 @@ final class AutoPilotController {
             return;
         }
         recycle(bitmap);
-        service.autoStatus("找到條列候選，重新確認後點擊");
+        service.autoStatus("條列找到 " + result.candidates.size() +
+                " 個候選，點擊第一個");
         tapRepeated(target, token, 0);
     }
 

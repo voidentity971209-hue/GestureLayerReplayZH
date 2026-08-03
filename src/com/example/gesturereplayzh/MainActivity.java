@@ -174,7 +174,7 @@ public final class MainActivity extends Activity {
         if (isExperimentalBuild()) {
             root.addView(sectionTitle(
                     "② 自動操作",
-                    "全畫面尋找 Pokémon 條列；收合時先按白色＝展開，再逐項嘗試。"
+                    "全畫面尋找固定 Pokémon 長條；白色＝只用來定位，程式不會點擊它。"
             ));
 
             TextView autoWarning = infoBox(

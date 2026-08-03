@@ -16,22 +16,19 @@ final class PokemonListDetector {
         final RectF panel;
         final List<PointF> candidates;
         final float confidence;
-        final PointF toggle;
+        final PointF equalsAnchor;
 
-        Result(RectF panel, List<PointF> candidates, float confidence, PointF toggle) {
+        Result(RectF panel, List<PointF> candidates, float confidence, PointF equalsAnchor) {
             this.panel = panel;
             this.candidates = candidates;
             this.confidence = confidence;
-            this.toggle = toggle;
+            this.equalsAnchor = equalsAnchor;
         }
 
         boolean foundPanel() {
             return panel != null && !panel.isEmpty();
         }
 
-        boolean isCollapsed(int screenWidth) {
-            return foundPanel() && panel.width() / screenWidth < .19f;
-        }
     }
 
     private PokemonListDetector() {}
@@ -58,19 +55,14 @@ final class PokemonListDetector {
             return new Result(new RectF(), Collections.emptyList(), 0f, null);
         }
         RectF panel = best.panel;
-        List<PointF> points = findRows(bitmap, panel);
+        PointF equalsAnchor = findEqualsAnchor(bitmap, panel);
+        if (equalsAnchor == null) {
+            return new Result(new RectF(), Collections.emptyList(), 0f, null);
+        }
+        List<PointF> points = findRows(bitmap, panel, equalsAnchor);
         float confidence = Math.min(1f, best.score * .72f +
                 Math.min(.28f, points.size() * .055f));
-        PointF toggle = findEqualsButton(bitmap, panel);
-        if (panel.width() / w < .19f) {
-            // The narrow/collapsed strip has a large touch target.  Its top
-            // boundary is translucent and can resemble two bright lines, so
-            // tap the stable center of the actual '=' button area instead of
-            // the first bright pixels at the boundary.
-            toggle = new PointF(panel.centerX(),
-                    Math.min(panel.bottom, panel.top + h * .08f));
-        }
-        return new Result(panel, points, confidence, toggle);
+        return new Result(panel, points, confidence, equalsAnchor);
     }
 
     private static float panelScore(Bitmap b, RectF panel) {
@@ -110,7 +102,7 @@ final class PokemonListDetector {
         return best;
     }
 
-    private static PointF findEqualsButton(Bitmap b, RectF panel) {
+    private static PointF findEqualsAnchor(Bitmap b, RectF panel) {
         int h = b.getHeight();
         int start = Math.round(panel.top + h * .005f);
         int end = Math.round(Math.min(panel.bottom, panel.top + h * .16f));
@@ -146,20 +138,41 @@ final class PokemonListDetector {
         return bright / (float) Math.max(1, total);
     }
 
-    private static List<PointF> findRows(Bitmap b, RectF panel) {
+    private static List<PointF> findRows(
+            Bitmap b,
+            RectF panel,
+            PointF equalsAnchor
+    ) {
         int h = b.getHeight();
-        int start = Math.round(panel.top + h * .09f);
-        int end = Math.round(panel.bottom - h * .10f);
+        // The white '=' and the radar icon are permanent controls on the same
+        // strip.  They are anchors, never Pokemon and never tap targets.
+        int start = Math.round(Math.max(
+                panel.top + h * .055f,
+                equalsAnchor.y + h * .075f
+        ));
+        float radarY = panel.bottom - h * .045f;
+        int end = Math.round(Math.min(
+                panel.bottom - h * .055f,
+                radarY - h * .115f
+        ));
+        if (end <= start) {
+            return Collections.emptyList();
+        }
         int step = Math.max(4, h / 220);
         List<RowScore> scores = new ArrayList<>();
         for (int y = start; y <= end; y += step) {
-            scores.add(new RowScore(y, rowScore(b, panel, y, h * .032f)));
+            scores.add(new RowScore(
+                    y,
+                    rowScore(b, panel, y, h * .032f),
+                    rowColorfulRatio(b, panel, y, h * .032f)
+            ));
         }
         scores.sort((a, c) -> Float.compare(c.score, a.score));
         List<RowScore> chosen = new ArrayList<>();
         float minDistance = h * .065f;
         for (RowScore row : scores) {
             if (row.score < .105f) break;
+            if (row.colorfulRatio < .045f) continue;
             boolean near = false;
             for (RowScore accepted : chosen) {
                 if (Math.abs(row.y - accepted.y) < minDistance) {
@@ -173,9 +186,37 @@ final class PokemonListDetector {
         chosen.sort(Comparator.comparingInt(a -> a.y));
         List<PointF> result = new ArrayList<>();
         for (RowScore row : chosen) {
-            result.add(new PointF(panel.centerX(), row.y));
+            result.add(new PointF(findRowCenterX(b, panel, row.y), row.y));
         }
         return result;
+    }
+
+    private static float findRowCenterX(Bitmap b, RectF panel, int cy) {
+        int halfHeight = Math.max(8, Math.round(b.getHeight() * .030f));
+        int left = Math.max(1, Math.round(panel.left + panel.width() * .07f));
+        int right = Math.min(b.getWidth() - 2,
+                Math.round(panel.right - panel.width() * .07f));
+        int top = Math.max(1, cy - halfHeight);
+        int bottom = Math.min(b.getHeight() - 2, cy + halfHeight);
+        int step = Math.max(2, b.getWidth() / 240);
+        float weightedX = 0f;
+        float weight = 0f;
+        for (int y = top; y <= bottom; y += step) {
+            for (int x = left; x <= right; x += step) {
+                int c = b.getPixel(x, y);
+                int max = Math.max(Color.red(c), Math.max(Color.green(c), Color.blue(c)));
+                int min = Math.min(Color.red(c), Math.min(Color.green(c), Color.blue(c)));
+                int edge = Math.max(
+                        difference(c, b.getPixel(Math.min(right, x + step), y)),
+                        difference(c, b.getPixel(x, Math.min(bottom, y + step)))
+                );
+                float pixelWeight = Math.max(0, max - min - 35) +
+                        Math.max(0, edge - 45) * .55f;
+                weightedX += x * pixelWeight;
+                weight += pixelWeight;
+            }
+        }
+        return weight <= 0f ? panel.centerX() : weightedX / weight;
     }
 
     private static float rowScore(Bitmap b, RectF panel, int cy, float halfHeight) {
@@ -200,6 +241,32 @@ final class PokemonListDetector {
         }
         return colorful / (float) Math.max(1, total) * .55f +
                 edges / (float) Math.max(1, total) * .45f;
+    }
+
+    private static float rowColorfulRatio(
+            Bitmap b,
+            RectF panel,
+            int cy,
+            float halfHeight
+    ) {
+        int left = Math.max(1, Math.round(panel.left + panel.width() * .10f));
+        int right = Math.min(b.getWidth() - 2,
+                Math.round(panel.right - panel.width() * .10f));
+        int top = Math.max(1, Math.round(cy - halfHeight));
+        int bottom = Math.min(b.getHeight() - 2, Math.round(cy + halfHeight));
+        int colorful = 0;
+        int total = 0;
+        int step = Math.max(2, b.getWidth() / 240);
+        for (int y = top; y <= bottom; y += step) {
+            for (int x = left; x <= right; x += step) {
+                int c = b.getPixel(x, y);
+                int max = Math.max(Color.red(c), Math.max(Color.green(c), Color.blue(c)));
+                int min = Math.min(Color.red(c), Math.min(Color.green(c), Color.blue(c)));
+                if (max - min > 50 && max > 90) colorful++;
+                total++;
+            }
+        }
+        return colorful / (float) Math.max(1, total);
     }
 
     private static float darkRatio(Bitmap b, float lf, float tf, float rf, float bf) {
@@ -274,6 +341,11 @@ final class PokemonListDetector {
     private static final class RowScore {
         final int y;
         final float score;
-        RowScore(int y, float score) { this.y = y; this.score = score; }
+        final float colorfulRatio;
+        RowScore(int y, float score, float colorfulRatio) {
+            this.y = y;
+            this.score = score;
+            this.colorfulRatio = colorfulRatio;
+        }
     }
 }

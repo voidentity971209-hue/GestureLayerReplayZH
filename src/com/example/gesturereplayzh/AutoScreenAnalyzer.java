@@ -103,6 +103,9 @@ final class AutoScreenAnalyzer {
         if (looksLikeEncounterReady(bitmap)) {
             return ScreenState.ENCOUNTER;
         }
+        if (looksLikeCaptureAnimation(bitmap)) {
+            return ScreenState.ENCOUNTER_WAIT;
+        }
         if (looksLikeRocketDialog(bitmap)) {
             return ScreenState.ROCKET_DIALOG;
         }
@@ -111,9 +114,6 @@ final class AutoScreenAnalyzer {
         }
         if (looksLikeMapScreen(bitmap)) {
             return ScreenState.MAP_RETURNED;
-        }
-        if (looksLikeCaptureAnimation(bitmap)) {
-            return ScreenState.ENCOUNTER_WAIT;
         }
         if (mapBeforeTap != null &&
                 mapBeforeTap.distance(new FrameSignature(bitmap)) < 0.105f &&
@@ -1220,7 +1220,7 @@ final class AutoScreenAnalyzer {
 
     private static boolean looksLikeEncounterReady(Bitmap bitmap) {
         return looksLikeEncounterContext(bitmap) &&
-                findEncounterBallCircleScore(bitmap) >= 0.15f;
+                findEncounterBallCircleScore(bitmap) >= 0.10f;
     }
 
     static boolean isStrictMapScreen(Bitmap bitmap) {
@@ -1232,6 +1232,13 @@ final class AutoScreenAnalyzer {
     }
 
     private static boolean looksLikeMapScreen(Bitmap bitmap) {
+        // A capture screen also contains a red/white ball and PGSharp may add
+        // map-like controls on the right.  The two encounter docks plus the
+        // large central ball take priority over every map anchor.
+        if (looksLikeEncounterContext(bitmap) &&
+                findEncounterBallCircleScore(bitmap) >= 0.065f) {
+            return false;
+        }
         if (!looksLikeMapMenuBall(bitmap)) {
             return false;
         }
@@ -1292,19 +1299,24 @@ final class AutoScreenAnalyzer {
                 stats(bitmap, 0.38f, 0.035f, 0.62f, 0.15f);
         RegionStats cpPanel =
                 stats(bitmap, 0.16f, 0.24f, 0.84f, 0.44f);
-        boolean cameraAnchor = cameraControl.whiteRatio > 0.006f &&
-                cameraControl.edgeRatio > 0.035f;
-        boolean cpAnchor = cpPanel.whiteRatio > 0.004f &&
-                cpPanel.edgeRatio > 0.035f &&
-                (cpPanel.darkRatio > 0.025f || cpPanel.edgeRatio > 0.075f);
-        return cameraAnchor && cpAnchor &&
-                looksLikeEncounterSideDocks(bitmap) &&
+        boolean cameraAnchor = cameraControl.whiteRatio > 0.005f &&
+                cameraControl.edgeRatio > 0.012f;
+        boolean cpAnchor = cpPanel.edgeRatio > 0.025f &&
+                cpPanel.edgeRatio < 0.30f &&
+                (
+                        cpPanel.whiteRatio > 0.004f ||
+                                cpPanel.darkRatio > 0.025f ||
+                                cpPanel.edgeRatio > 0.10f
+                );
+        boolean bottomAnchor = looksLikeEncounterSideDocks(bitmap) ||
+                findEncounterBallCircleScore(bitmap) >= 0.55f;
+        return cameraAnchor && cpAnchor && bottomAnchor &&
                 !looksLikeMapScreenRelaxed(bitmap);
     }
 
     private static boolean looksLikeCaptureAnimation(Bitmap bitmap) {
-        return looksLikeEncounterSideDocks(bitmap) &&
-                findEncounterBallCircleScore(bitmap) >= 0.08f;
+        return looksLikeEncounterContext(bitmap) &&
+                findEncounterBallCircleScore(bitmap) >= 0.055f;
     }
 
     private static boolean looksLikeEncounterSideDocks(Bitmap bitmap) {
