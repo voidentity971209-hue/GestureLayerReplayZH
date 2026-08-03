@@ -545,17 +545,12 @@ public final class GestureAccessibilityService extends AccessibilityService {
         }
         LinearLayout panel = (LinearLayout) floatingControls;
         for (int i = 0; i < panel.getChildCount(); i++) {
-            View child = panel.getChildAt(i);
-            child.setVisibility(
-                    !running || child == autoControlButton
-                            ? View.VISIBLE
-                            : View.GONE
-            );
+            panel.getChildAt(i).setVisibility(View.VISIBLE);
         }
-        autoControlButton.setText(running ? "自停" : "自");
+        autoControlButton.setText(running ? "停止" : "自");
         LinearLayout.LayoutParams params =
                 (LinearLayout.LayoutParams) autoControlButton.getLayoutParams();
-        params.width = dp(running ? 36 : 46);
+        params.width = dp(46);
         autoControlButton.setLayoutParams(params);
     }
 

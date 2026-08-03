@@ -36,33 +36,211 @@ final class PokemonListDetector {
     static Result find(Bitmap bitmap) {
         int w = bitmap.getWidth();
         int h = bitmap.getHeight();
-        PanelCandidate best = null;
-        for (float widthRatio = .12f; widthRatio <= .30f; widthRatio += .03f) {
-            float panelWidth = w * widthRatio;
-            for (float left = 0; left + panelWidth <= w; left += w * .035f) {
-                for (float top = 0; top <= h * .60f; top += h * .05f) {
-                    for (float bottom = h * .75f; bottom <= h; bottom += h * .05f) {
-                        RectF panel = new RectF(left, top, left + panelWidth, bottom);
-                        float score = panelScore(bitmap, panel);
-                        if (best == null || score > best.score) {
-                            best = new PanelCandidate(panel, score);
-                        }
+        EqualsPair equals = findGlobalEquals(bitmap);
+        if (equals == null) {
+            return new Result(new RectF(), Collections.emptyList(), 0f, null);
+        }
+        float panelWidth = clamp(equals.averageLength * 2.45f,
+                w * .11f, w * .30f);
+        float left = clamp(equals.centerX - panelWidth / 2f,
+                0f, w - panelWidth);
+        float radarY = findRadarY(bitmap, equals.centerX, equals.bottomY);
+        float top = Math.max(0f, equals.topY - h * .060f);
+        float bottom = Math.min(h, radarY + h * .080f);
+        RectF panel = new RectF(left, top, left + panelWidth, bottom);
+        PointF equalsAnchor = new PointF(equals.centerX,
+                (equals.topY + equals.bottomY) / 2f);
+        List<PointF> points = findRows(bitmap, panel, equalsAnchor);
+        float confidence = Math.min(1f, equals.score * .72f +
+                Math.min(.28f, points.size() * .055f));
+        return new Result(panel, points, confidence, equalsAnchor);
+    }
+
+    private static EqualsPair findGlobalEquals(Bitmap b) {
+        int w = b.getWidth();
+        int h = b.getHeight();
+        int yStep = Math.max(2, h / 520);
+        int minimumLength = Math.max(12, Math.round(w * .025f));
+        int maximumLength = Math.max(minimumLength, Math.round(w * .20f));
+        List<LineRun> runs = new ArrayList<>();
+        for (int y = Math.round(h * .015f);
+             y <= Math.round(h * .72f);
+             y += yStep) {
+            int start = -1;
+            for (int x = 0; x <= w; x++) {
+                boolean bright = x < w && isNeutralBright(b.getPixel(x, y));
+                if (bright && start < 0) {
+                    start = x;
+                } else if (!bright && start >= 0) {
+                    int length = x - start;
+                    if (length >= minimumLength && length <= maximumLength) {
+                        runs.add(new LineRun(y, start, x - 1));
                     }
+                    start = -1;
                 }
             }
         }
-        if (best == null || best.score < .31f) {
-            return new Result(new RectF(), Collections.emptyList(), 0f, null);
+        List<EqualsPair> pairs = new ArrayList<>();
+        List<EqualsPair> triples = new ArrayList<>();
+        int minimumGap = Math.max(4, Math.round(h * .006f));
+        int maximumGap = Math.max(minimumGap, Math.round(h * .040f));
+        for (int firstIndex = 0; firstIndex < runs.size(); firstIndex++) {
+            LineRun first = runs.get(firstIndex);
+            for (int secondIndex = firstIndex + 1;
+                 secondIndex < runs.size();
+                 secondIndex++) {
+                LineRun second = runs.get(secondIndex);
+                int gap = second.y - first.y;
+                if (gap < minimumGap) continue;
+                if (gap > maximumGap) break;
+                float overlap = Math.max(0,
+                        Math.min(first.right, second.right) -
+                                Math.max(first.left, second.left) + 1);
+                float overlapRatio = overlap /
+                        Math.max(1f, Math.max(first.length(), second.length()));
+                if (overlapRatio < .62f) continue;
+                float lengthSimilarity = Math.min(first.length(), second.length()) /
+                        (float) Math.max(first.length(), second.length());
+                float averageLength = (first.length() + second.length()) / 2f;
+                float gapRatio = gap / Math.max(1f, averageLength);
+                if (gapRatio < .10f || gapRatio > .95f) continue;
+                float gapScore = clamp(1f - Math.abs(gapRatio - .40f) / .55f,
+                        0f, 1f);
+                float centerX = (first.centerX() + second.centerX()) / 2f;
+                float localDark = darkRatio(
+                        b,
+                        centerX - averageLength * .85f,
+                        first.y - gap * .70f,
+                        centerX + averageLength * .85f,
+                        second.y + gap * .70f
+                );
+                float lineScore = overlapRatio * .34f +
+                        lengthSimilarity * .22f + gapScore * .18f +
+                        localDark * .26f;
+                EqualsPair pair = new EqualsPair(
+                        centerX,
+                        first.y,
+                        second.y,
+                        averageLength,
+                        lineScore
+                );
+                pairs.add(pair);
+                for (int thirdIndex = secondIndex + 1;
+                     thirdIndex < runs.size();
+                     thirdIndex++) {
+                    LineRun third = runs.get(thirdIndex);
+                    int secondGap = third.y - second.y;
+                    if (secondGap < minimumGap) continue;
+                    if (secondGap > maximumGap) break;
+                    float gapSimilarity = Math.min(gap, secondGap) /
+                            (float) Math.max(gap, secondGap);
+                    if (gapSimilarity < .58f) continue;
+                    float thirdOverlap = Math.max(0,
+                            Math.min(first.right, third.right) -
+                                    Math.max(first.left, third.left) + 1);
+                    float thirdOverlapRatio = thirdOverlap /
+                            Math.max(1f, Math.max(first.length(), third.length()));
+                    float thirdLengthSimilarity = Math.min(first.length(), third.length()) /
+                            (float) Math.max(first.length(), third.length());
+                    if (thirdOverlapRatio < .58f || thirdLengthSimilarity < .55f) {
+                        continue;
+                    }
+                    float tripleCenter = (first.centerX() + second.centerX() +
+                            third.centerX()) / 3f;
+                    float tripleLength = (first.length() + second.length() +
+                            third.length()) / 3f;
+                    triples.add(new EqualsPair(
+                            tripleCenter,
+                            first.y,
+                            third.y,
+                            tripleLength,
+                            clamp(lineScore * .70f + gapSimilarity * .15f +
+                                    thirdOverlapRatio * .15f, 0f, 1f)
+                    ));
+                }
+            }
         }
-        RectF panel = best.panel;
-        PointF equalsAnchor = findEqualsAnchor(bitmap, panel);
-        if (equalsAnchor == null) {
-            return new Result(new RectF(), Collections.emptyList(), 0f, null);
+        pairs.addAll(triples);
+        pairs.sort((a, c) -> Float.compare(c.score, a.score));
+        EqualsPair best = null;
+        float bestScore = 0f;
+        int candidateLimit = Math.min(128, pairs.size());
+        for (int pairIndex = 0; pairIndex < candidateLimit; pairIndex++) {
+            EqualsPair pair = pairs.get(pairIndex);
+            float radarScore = radarScoreBelow(b, pair.centerX, pair.bottomY);
+            float radarY = findRadarY(b, pair.centerX, pair.bottomY);
+            float candidateWidth = clamp(pair.averageLength * 2.45f,
+                    w * .11f, w * .30f);
+            float candidateLeft = clamp(pair.centerX - candidateWidth / 2f,
+                    0f, w - candidateWidth);
+            RectF candidatePanel = new RectF(
+                    candidateLeft,
+                    Math.max(0f, pair.topY - h * .060f),
+                    candidateLeft + candidateWidth,
+                    Math.min(h, radarY + h * .080f)
+            );
+            float columnScore = panelScore(b, candidatePanel);
+            float spanScore = clamp(
+                    (radarY - pair.bottomY) / (h * .72f), 0f, 1f);
+            float total = pair.score * .20f + radarScore * .10f +
+                    columnScore * .60f + spanScore * .10f;
+            if (total > bestScore) {
+                bestScore = total;
+                best = new EqualsPair(
+                        pair.centerX,
+                        pair.topY,
+                        pair.bottomY,
+                        pair.averageLength,
+                        total
+                );
+            }
         }
-        List<PointF> points = findRows(bitmap, panel, equalsAnchor);
-        float confidence = Math.min(1f, best.score * .72f +
-                Math.min(.28f, points.size() * .055f));
-        return new Result(panel, points, confidence, equalsAnchor);
+        return best != null && best.score >= .43f ? best : null;
+    }
+
+    private static boolean isNeutralBright(int color) {
+        int maximum = Math.max(Color.red(color),
+                Math.max(Color.green(color), Color.blue(color)));
+        int minimum = Math.min(Color.red(color),
+                Math.min(Color.green(color), Color.blue(color)));
+        return maximum >= 160 && maximum - minimum <= 82;
+    }
+
+    private static float radarScoreBelow(Bitmap b, float centerX, float equalsBottom) {
+        int h = b.getHeight();
+        float best = 0f;
+        float startY = Math.max(equalsBottom + h * .18f, h * .70f);
+        for (float y = startY; y <= h * .95f;
+             y += Math.max(5f, h / 135f)) {
+            for (float radius = b.getWidth() * .040f;
+                 radius <= b.getWidth() * .115f;
+                 radius += Math.max(4f, b.getWidth() * .012f)) {
+                best = Math.max(best, circleScore(b, centerX, y, radius));
+            }
+        }
+        return best;
+    }
+
+    private static float findRadarY(Bitmap b, float centerX, float equalsBottom) {
+        int h = b.getHeight();
+        float bestScore = 0f;
+        float bestY = h * .90f;
+        float startY = Math.max(equalsBottom + h * .18f, h * .70f);
+        for (float y = startY; y <= h * .95f;
+             y += Math.max(5f, h / 135f)) {
+            float atY = 0f;
+            for (float radius = b.getWidth() * .040f;
+                 radius <= b.getWidth() * .115f;
+                 radius += Math.max(4f, b.getWidth() * .012f)) {
+                atY = Math.max(atY, circleScore(b, centerX, y, radius));
+            }
+            float score = atY + y / h * .035f;
+            if (score > bestScore) {
+                bestScore = score;
+                bestY = y;
+            }
+        }
+        return bestY;
     }
 
     private static float panelScore(Bitmap b, RectF panel) {
@@ -334,6 +512,40 @@ final class PokemonListDetector {
         final float score;
         PanelCandidate(RectF panel, float score) {
             this.panel = new RectF(panel);
+            this.score = score;
+        }
+    }
+
+    private static final class LineRun {
+        final int y;
+        final int left;
+        final int right;
+        LineRun(int y, int left, int right) {
+            this.y = y;
+            this.left = left;
+            this.right = right;
+        }
+        int length() { return right - left + 1; }
+        float centerX() { return (left + right) / 2f; }
+    }
+
+    private static final class EqualsPair {
+        final float centerX;
+        final float topY;
+        final float bottomY;
+        final float averageLength;
+        final float score;
+        EqualsPair(
+                float centerX,
+                float topY,
+                float bottomY,
+                float averageLength,
+                float score
+        ) {
+            this.centerX = centerX;
+            this.topY = topY;
+            this.bottomY = bottomY;
+            this.averageLength = averageLength;
             this.score = score;
         }
     }
