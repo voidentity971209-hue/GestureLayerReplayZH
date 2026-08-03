@@ -293,7 +293,7 @@ public final class GestureAccessibilityService extends AccessibilityService {
                     stopPlayback();
                 } else {
                     if (!AutoSettings.load(this).autoEnabled) {
-                        toast("請先回主程式勾選允許全自動實驗功能");
+                        toast("請先回主程式勾選允許自動操作");
                         return;
                     }
                     cancelGesturePlayback();

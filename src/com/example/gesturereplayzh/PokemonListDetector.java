@@ -16,11 +16,21 @@ final class PokemonListDetector {
         final RectF panel;
         final List<PointF> candidates;
         final float confidence;
+        final PointF toggle;
 
-        Result(RectF panel, List<PointF> candidates, float confidence) {
+        Result(RectF panel, List<PointF> candidates, float confidence, PointF toggle) {
             this.panel = panel;
             this.candidates = candidates;
             this.confidence = confidence;
+            this.toggle = toggle;
+        }
+
+        boolean foundPanel() {
+            return panel != null && !panel.isEmpty();
+        }
+
+        boolean isCollapsed(int screenWidth) {
+            return foundPanel() && panel.width() / screenWidth < .19f;
         }
     }
 
@@ -33,8 +43,8 @@ final class PokemonListDetector {
         for (float widthRatio = .12f; widthRatio <= .30f; widthRatio += .03f) {
             float panelWidth = w * widthRatio;
             for (float left = 0; left + panelWidth <= w; left += w * .035f) {
-                for (float top = h * .10f; top <= h * .58f; top += h * .06f) {
-                    for (float bottom = h * .72f; bottom <= h * .96f; bottom += h * .06f) {
+                for (float top = 0; top <= h * .60f; top += h * .05f) {
+                    for (float bottom = h * .75f; bottom <= h; bottom += h * .05f) {
                         RectF panel = new RectF(left, top, left + panelWidth, bottom);
                         float score = panelScore(bitmap, panel);
                         if (best == null || score > best.score) {
@@ -45,13 +55,22 @@ final class PokemonListDetector {
             }
         }
         if (best == null || best.score < .31f) {
-            return new Result(new RectF(), Collections.emptyList(), 0f);
+            return new Result(new RectF(), Collections.emptyList(), 0f, null);
         }
         RectF panel = best.panel;
         List<PointF> points = findRows(bitmap, panel);
         float confidence = Math.min(1f, best.score * .72f +
                 Math.min(.28f, points.size() * .055f));
-        return new Result(panel, points, confidence);
+        PointF toggle = findEqualsButton(bitmap, panel);
+        if (panel.width() / w < .19f) {
+            // The narrow/collapsed strip has a large touch target.  Its top
+            // boundary is translucent and can resemble two bright lines, so
+            // tap the stable center of the actual '=' button area instead of
+            // the first bright pixels at the boundary.
+            toggle = new PointF(panel.centerX(),
+                    Math.min(panel.bottom, panel.top + h * .08f));
+        }
+        return new Result(panel, points, confidence, toggle);
     }
 
     private static float panelScore(Bitmap b, RectF panel) {
@@ -64,13 +83,19 @@ final class PokemonListDetector {
         float surround = Math.max(leftLuma, rightLuma);
         float contrast = clamp((surround - panelLuma) / 85f, 0f, 1f);
         float darkness = darkRatio(b, panel.left, panel.top, panel.right, panel.bottom);
-        float menu = menuBarsScore(b, panel);
+        float menu = equalsBarsScore(b, panel);
         float radar = circleScore(b, panel.centerX(),
                 panel.bottom - b.getHeight() * .045f, b.getWidth() * .055f);
-        return contrast * .30f + darkness * .22f + menu * .28f + radar * .20f;
+        float heightCoverage = clamp(panel.height() / b.getHeight(), 0f, 1f);
+        float widthCoverage = panel.width() / b.getWidth();
+        float shapeScore = widthCoverage < .19f
+                ? clamp(1f - Math.abs(heightCoverage - .48f) / .48f, 0f, 1f)
+                : heightCoverage;
+        return contrast * .24f + darkness * .18f + menu * .23f +
+                radar * .15f + shapeScore * .20f;
     }
 
-    private static float menuBarsScore(Bitmap b, RectF panel) {
+    private static float equalsBarsScore(Bitmap b, RectF panel) {
         int h = b.getHeight();
         int start = Math.round(panel.top + h * .01f);
         int end = Math.round(Math.min(panel.bottom, panel.top + h * .14f));
@@ -80,10 +105,30 @@ final class PokemonListDetector {
         for (int y = start; y <= end; y += Math.max(3, h / 260)) {
             float first = brightLineRatio(b, panel.centerX(), y, half);
             float second = brightLineRatio(b, panel.centerX(), y + gap, half);
-            float third = brightLineRatio(b, panel.centerX(), y + gap * 2, half);
-            best = Math.max(best, (first + second + Math.max(second, third)) / 3f);
+            best = Math.max(best, Math.min(first, second));
         }
         return best;
+    }
+
+    private static PointF findEqualsButton(Bitmap b, RectF panel) {
+        int h = b.getHeight();
+        int start = Math.round(panel.top + h * .005f);
+        int end = Math.round(Math.min(panel.bottom, panel.top + h * .16f));
+        int half = Math.max(8, Math.round(panel.width() * .32f));
+        int gap = Math.max(4, Math.round(h * .009f));
+        float best = 0f;
+        int bestY = start;
+        for (int y = start; y <= end; y += Math.max(3, h / 260)) {
+            float score = Math.min(
+                    brightLineRatio(b, panel.centerX(), y, half),
+                    brightLineRatio(b, panel.centerX(), y + gap, half)
+            );
+            if (score > best) {
+                best = score;
+                bestY = y + gap / 2;
+            }
+        }
+        return best >= .22f ? new PointF(panel.centerX(), bestY) : null;
     }
 
     private static float brightLineRatio(Bitmap b, float centerX, int y, int half) {
@@ -99,31 +144,6 @@ final class PokemonListDetector {
             total++;
         }
         return bright / (float) Math.max(1, total);
-    }
-
-    private static float hamburgerScore(Bitmap b, int cx, int cy) {
-        int w = b.getWidth();
-        int h = b.getHeight();
-        int half = Math.max(10, Math.round(w * .040f));
-        int gap = Math.max(4, Math.round(h * .010f));
-        float lines = 0f;
-        for (int row = -1; row <= 1; row++) {
-            int y = cy + row * gap;
-            int bright = 0;
-            int total = 0;
-            for (int x = cx - half; x <= cx + half; x += 2) {
-                if (x < 1 || x >= w - 1 || y < 1 || y >= h - 1) continue;
-                int c = b.getPixel(x, y);
-                int max = Math.max(Color.red(c), Math.max(Color.green(c), Color.blue(c)));
-                int min = Math.min(Color.red(c), Math.min(Color.green(c), Color.blue(c)));
-                if (max > 155 && max - min < 80) bright++;
-                total++;
-            }
-            lines += bright / (float) Math.max(1, total);
-        }
-        float dark = darkRatio(b, cx - half * 2, cy - gap * 3,
-                cx + half * 2, cy + gap * 3);
-        return lines / 3f * .80f + dark * .20f;
     }
 
     private static List<PointF> findRows(Bitmap b, RectF panel) {

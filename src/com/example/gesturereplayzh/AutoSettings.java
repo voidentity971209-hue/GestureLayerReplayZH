@@ -5,12 +5,6 @@ import android.content.SharedPreferences;
 
 final class AutoSettings {
     private static final String PREFS = "auto_operation_settings";
-    static final String CURRENT_GESTURE_SOURCE = "current";
-
-    String scanDescription;
-    String encounterDescription;
-    String rocketDescription;
-    String exitDescription;
     long scanIntervalMs;
     int recognitionFrameCount;
     int listTapCount;
@@ -25,24 +19,35 @@ final class AutoSettings {
     int rocketTapCount;
     float rocketTapXRatio;
     float rocketTapYRatio;
-    float exitXRatio;
-    float exitYRatio;
-    String catchGestureSourceId;
     boolean autoEnabled;
     long unknownTimeoutMs;
-    long closeTimeoutMs;
-    boolean allowFallbackExit;
     long blockedDurationMs;
     float blockedRadiusRatio;
     int blockedMaxCount;
 
     static AutoSettings load(Context context) {
         SharedPreferences p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        p.edit()
+                .remove("scanDescription")
+                .remove("encounterDescription")
+                .remove("rocketDescription")
+                .remove("exitDescription")
+                .remove("detectorMode")
+                .remove("modelConfidenceThreshold")
+                .remove("modelMaxResults")
+                .remove("modelThreads")
+                .remove("collectModelEvents")
+                .remove("dataLimitMb")
+                .remove("positiveSamplePercent")
+                .remove("legacySensitivity")
+                .remove("scanRadiusRatio")
+                .remove("closeTimeoutMs")
+                .remove("allowFallbackExit")
+                .remove("exitXRatio")
+                .remove("exitYRatio")
+                .remove("catchGestureSourceId")
+                .apply();
         AutoSettings s = defaults();
-        s.scanDescription = p.getString("scanDescription", s.scanDescription);
-        s.encounterDescription = p.getString("encounterDescription", s.encounterDescription);
-        s.rocketDescription = p.getString("rocketDescription", s.rocketDescription);
-        s.exitDescription = p.getString("exitDescription", s.exitDescription);
         s.scanIntervalMs = readTime(p, "scanIntervalMs", s.scanIntervalMs);
         s.recognitionFrameCount = clamp(p.getInt("recognitionFrameCount", s.recognitionFrameCount), 1, 5);
         s.listTapCount = clamp(p.getInt("listTapCount", s.listTapCount), 1, 4);
@@ -57,13 +62,8 @@ final class AutoSettings {
         s.rocketTapCount = clamp(p.getInt("rocketTapCount", s.rocketTapCount), 1, 5);
         s.rocketTapXRatio = readRatio(p, "rocketTapXRatio", s.rocketTapXRatio);
         s.rocketTapYRatio = readRatio(p, "rocketTapYRatio", s.rocketTapYRatio);
-        s.exitXRatio = readRatio(p, "exitXRatio", s.exitXRatio);
-        s.exitYRatio = readRatio(p, "exitYRatio", s.exitYRatio);
-        s.catchGestureSourceId = CURRENT_GESTURE_SOURCE;
         s.autoEnabled = p.getBoolean("autoEnabled", false);
         s.unknownTimeoutMs = readTime(p, "unknownTimeoutMs", s.unknownTimeoutMs);
-        s.closeTimeoutMs = readTime(p, "closeTimeoutMs", s.closeTimeoutMs);
-        s.allowFallbackExit = p.getBoolean("allowFallbackExit", false);
         s.blockedDurationMs = readTime(p, "blockedDurationMs", s.blockedDurationMs);
         s.blockedRadiusRatio = clamp(p.getFloat("blockedRadiusRatio", s.blockedRadiusRatio), .01f, .20f);
         s.blockedMaxCount = clamp(p.getInt("blockedMaxCount", s.blockedMaxCount), 1, 200);
@@ -72,10 +72,6 @@ final class AutoSettings {
 
     void save(Context context) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-                .putString("scanDescription", scanDescription)
-                .putString("encounterDescription", encounterDescription)
-                .putString("rocketDescription", rocketDescription)
-                .putString("exitDescription", exitDescription)
                 .putLong("scanIntervalMs", normalizeTime(scanIntervalMs))
                 .putInt("recognitionFrameCount", clamp(recognitionFrameCount, 1, 5))
                 .putInt("listTapCount", clamp(listTapCount, 1, 4))
@@ -90,13 +86,8 @@ final class AutoSettings {
                 .putInt("rocketTapCount", clamp(rocketTapCount, 1, 5))
                 .putFloat("rocketTapXRatio", normalizeRatio(rocketTapXRatio))
                 .putFloat("rocketTapYRatio", normalizeRatio(rocketTapYRatio))
-                .putFloat("exitXRatio", normalizeRatio(exitXRatio))
-                .putFloat("exitYRatio", normalizeRatio(exitYRatio))
-                .putString("catchGestureSourceId", CURRENT_GESTURE_SOURCE)
                 .putBoolean("autoEnabled", autoEnabled)
                 .putLong("unknownTimeoutMs", normalizeTime(unknownTimeoutMs))
-                .putLong("closeTimeoutMs", normalizeTime(closeTimeoutMs))
-                .putBoolean("allowFallbackExit", allowFallbackExit)
                 .putLong("blockedDurationMs", normalizeTime(blockedDurationMs))
                 .putFloat("blockedRadiusRatio", clamp(blockedRadiusRatio, .01f, .20f))
                 .putInt("blockedMaxCount", clamp(blockedMaxCount, 1, 200))
@@ -109,10 +100,6 @@ final class AutoSettings {
 
     private static AutoSettings defaults() {
         AutoSettings s = new AutoSettings();
-        s.scanDescription = "全螢幕尋找 Pokémon 條列，逐項重新掃描";
-        s.encounterDescription = "以相機、名稱 CP、左右欄與中央球判定後播放目前手勢";
-        s.rocketDescription = "火箭隊對話後尋找下方 X 退出";
-        s.exitDescription = "只在辨識到真正 X 後退出，未知畫面不觸控";
         s.scanIntervalMs = 300L;
         s.recognitionFrameCount = 1;
         s.listTapCount = 2;
@@ -127,13 +114,8 @@ final class AutoSettings {
         s.rocketTapCount = 2;
         s.rocketTapXRatio = .50f;
         s.rocketTapYRatio = .69f;
-        s.exitXRatio = .50f;
-        s.exitYRatio = .938f;
-        s.catchGestureSourceId = CURRENT_GESTURE_SOURCE;
         s.autoEnabled = false;
         s.unknownTimeoutMs = 15000L;
-        s.closeTimeoutMs = 10000L;
-        s.allowFallbackExit = false;
         s.blockedDurationMs = 60000L;
         s.blockedRadiusRatio = .07f;
         s.blockedMaxCount = 40;

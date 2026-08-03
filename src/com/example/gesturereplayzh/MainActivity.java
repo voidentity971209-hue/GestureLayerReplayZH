@@ -68,7 +68,7 @@ public final class MainActivity extends Activity {
 
         TextView title = text(
                 isExperimentalBuild()
-                        ? "大師球手勢實驗室"
+                        ? "刷機"
                         : "大師球手勢模擬器",
                 28f,
                 Color.BLACK
@@ -78,7 +78,7 @@ public final class MainActivity extends Activity {
 
         TextView subtitle = text(
                 isExperimentalBuild()
-                        ? "手勢模擬與條列式自動操作各自分區。永久免費、免 Root、不含廣告。"
+                        ? "錄製、保存與播放手勢，也可啟動 Pokémon 條列自動操作。"
                         : "分開錄製每一條滑動，再疊加成同一個手勢播放。永久免費、免 Root、不含廣告。",
                 16f,
                 0xFF444444
@@ -173,31 +173,29 @@ public final class MainActivity extends Activity {
 
         if (isExperimentalBuild()) {
             root.addView(sectionTitle(
-                    "② 全自動操作",
-                    "控制何時掃描、捕捉、退出及重試。畫面判斷方法固定，時間與操作座標可修改。"
+                    "② 自動操作",
+                    "全畫面尋找 Pokémon 條列；收合時先按白色＝展開，再逐項嘗試。"
             ));
 
             TextView autoWarning = infoBox(
-                    "開始前請把遊戲地圖調成最大視野、最高角度，" +
-                            "並隱藏第三方功能按鈕。這是實驗功能，" +
-                            "可能誤判，也可能被遊戲服務視為自動化操作。",
+                    "開始前請把地圖調成最大視野、最高角度。自動操作仍可能誤判。",
                     0xFFFFF3E0,
                     0xFF7A3E00
             );
             root.addView(autoWarning);
 
             CheckBox autoEnabled = new CheckBox(this);
-            autoEnabled.setText("我了解風險，允許啟動全自動實驗功能");
+            autoEnabled.setText("允許啟動自動操作");
             autoEnabled.setChecked(AutoSettings.load(this).autoEnabled);
             autoEnabled.setOnCheckedChangeListener((buttonView, checked) -> {
                 AutoSettings settings = AutoSettings.load(this);
                 settings.autoEnabled = checked;
                 settings.save(this);
-                toast(checked ? "已允許全自動實驗功能" : "已停用全自動實驗功能");
+                toast(checked ? "已允許自動操作" : "已停用自動操作");
             });
             root.addView(autoEnabled);
 
-            Button autoSettings = button("調整全自動操作設定");
+            Button autoSettings = button("調整自動操作設定");
             autoSettings.setOnClickListener(v -> showAutoSettingsDialog());
             root.addView(autoSettings);
 
@@ -588,7 +586,7 @@ public final class MainActivity extends Activity {
         ));
 
         TextView explanation = text(
-                "畫面辨識條件不可修改；以下操作參數都可修改。",
+                "只保留目前流程會使用的等待時間與次數。畫面辨識規則固定。",
                 14f,
                 0xFF555555
         );
@@ -607,30 +605,6 @@ public final class MainActivity extends Activity {
         fields.setPadding(dp(20), dp(8), dp(20), dp(8));
         scroll.addView(fields);
 
-        EditText scanDescription = addTextField(
-                fields,
-                "掃描步驟名稱／描述",
-                settings.scanDescription
-        );
-        addFieldHelp(
-                fields,
-                "只改變介面顯示名稱，不會改變畫面判斷方法。"
-        );
-        EditText encounterDescription = addTextField(
-                fields,
-                "捕捉步驟名稱／描述",
-                settings.encounterDescription
-        );
-        EditText rocketDescription = addTextField(
-                fields,
-                "火箭隊步驟名稱／描述",
-                settings.rocketDescription
-        );
-        EditText exitDescription = addTextField(
-                fields,
-                "退出步驟名稱／描述",
-                settings.exitDescription
-        );
         EditText scanInterval = addNumberField(
                 fields,
                 "掃描間隔（秒，0.1 為單位）",
@@ -680,34 +654,6 @@ public final class MainActivity extends Activity {
                 "未知畫面安全停止時間（秒）",
                 settings.unknownTimeoutMs / 1000f
         );
-        EditText closeTimeout = addNumberField(
-                fields,
-                "等待下方 X 最長時間（秒）",
-                settings.closeTimeoutMs / 1000f
-        );
-        CheckBox allowFallbackExit = new CheckBox(this);
-        allowFallbackExit.setText("X 逾時後允許使用備用退出座標（預設關閉）");
-        allowFallbackExit.setChecked(settings.allowFallbackExit);
-        fields.addView(allowFallbackExit);
-        addFieldHelp(
-                fields,
-                "關閉時，逾時會安全停止；開啟後才會使用下方設定的退出座標。"
-        );
-        EditText blockedDuration = addNumberField(
-                fields,
-                "錯誤位置封鎖時間（秒）",
-                settings.blockedDurationMs / 1000f
-        );
-        EditText blockedRadius = addNumberField(
-                fields,
-                "錯誤位置封鎖半徑（螢幕寬度百分比）",
-                settings.blockedRadiusRatio * 100f
-        );
-        EditText blockedMaxCount = addIntegerField(
-                fields,
-                "最多保存錯誤位置數量（1～200）",
-                settings.blockedMaxCount
-        );
         EditText rocketInterval = addNumberField(
                 fields,
                 "火箭隊每次對話點擊間隔（秒）",
@@ -750,33 +696,8 @@ public final class MainActivity extends Activity {
                 fields,
                 "退出補給站、道館或其他頁面後，等待地圖重新顯示的時間。"
         );
-        EditText rocketX = addNumberField(
-                fields,
-                "火箭隊對話點擊 X（螢幕百分比）",
-                settings.rocketTapXRatio * 100f
-        );
-        EditText rocketY = addNumberField(
-                fields,
-                "火箭隊對話點擊 Y（螢幕百分比）",
-                settings.rocketTapYRatio * 100f
-        );
-        EditText exitX = addNumberField(
-                fields,
-                "退出 X 座標（螢幕百分比）",
-                settings.exitXRatio * 100f
-        );
-        EditText exitY = addNumberField(
-                fields,
-                "退出 Y 座標（螢幕百分比）",
-                settings.exitYRatio * 100f
-        );
-        addFieldHelp(
-                fields,
-                "座標使用螢幕百分比而非固定像素；X 從左到右，Y 從上到下。" +
-                        "只有開啟上方備用退出開關且等待 X 逾時時才使用。"
-        );
         TextView catchSourceNotice = text(
-                "捕捉手勢來源固定為本實驗版主畫面的「目前手勢」，" +
+                "捕捉時會播放主畫面的「目前手勢」，" +
                         "不會讀取任何保存版本。",
                 14f,
                 0xFF1B5E20
@@ -797,7 +718,7 @@ public final class MainActivity extends Activity {
         dialogContent.addView(actions);
 
         AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle("全自動操作設定")
+                .setTitle("自動操作設定")
                 .setView(dialogContent)
                 .create();
 
@@ -809,14 +730,6 @@ public final class MainActivity extends Activity {
         });
         cancel.setOnClickListener(v -> dialog.dismiss());
         save.setOnClickListener(v -> {
-            settings.scanDescription =
-                    nonEmpty(scanDescription, settings.scanDescription);
-            settings.encounterDescription =
-                    nonEmpty(encounterDescription, settings.encounterDescription);
-            settings.rocketDescription =
-                    nonEmpty(rocketDescription, settings.rocketDescription);
-            settings.exitDescription =
-                    nonEmpty(exitDescription, settings.exitDescription);
             settings.scanIntervalMs =
                     seconds(scanInterval, settings.scanIntervalMs);
             settings.recognitionFrameCount = integerValue(
@@ -839,31 +752,6 @@ public final class MainActivity extends Activity {
                     unknownTimeout,
                     settings.unknownTimeoutMs
             );
-            settings.closeTimeoutMs = seconds(
-                    closeTimeout,
-                    settings.closeTimeoutMs
-            );
-            settings.allowFallbackExit = allowFallbackExit.isChecked();
-            settings.blockedDurationMs = seconds(
-                    blockedDuration,
-                    settings.blockedDurationMs
-            );
-            settings.blockedRadiusRatio = Math.max(
-                    0.01f,
-                    Math.min(
-                            0.20f,
-                            percentage(
-                                    blockedRadius,
-                                    settings.blockedRadiusRatio
-                            )
-                    )
-            );
-            settings.blockedMaxCount = integerValue(
-                    blockedMaxCount,
-                    settings.blockedMaxCount,
-                    1,
-                    200
-            );
             settings.rocketTapIntervalMs =
                     seconds(rocketInterval, settings.rocketTapIntervalMs);
             settings.beforeCatchMs =
@@ -874,20 +762,10 @@ public final class MainActivity extends Activity {
                     seconds(afterExit, settings.afterExitMs);
             settings.rocketTapCount =
                     integerValue(rocketCount, settings.rocketTapCount, 1, 5);
-            settings.rocketTapXRatio =
-                    percentage(rocketX, settings.rocketTapXRatio);
-            settings.rocketTapYRatio =
-                    percentage(rocketY, settings.rocketTapYRatio);
-            settings.exitXRatio =
-                    percentage(exitX, settings.exitXRatio);
-            settings.exitYRatio =
-                    percentage(exitY, settings.exitYRatio);
-            settings.catchGestureSourceId =
-                    AutoSettings.CURRENT_GESTURE_SOURCE;
             settings.save(this);
             dialog.dismiss();
             refreshCatchGestureInfo();
-            toast("已保存全自動操作設定");
+            toast("已保存自動操作設定");
         });
         dialog.show();
         if (dialog.getWindow() != null) {
@@ -907,21 +785,17 @@ public final class MainActivity extends Activity {
             return;
         }
         List<GestureLayer> currentLayers = GestureStore.load(this);
-        String currentFingerprint =
-                GestureIdentity.fingerprint(currentLayers);
         if (currentLayers.isEmpty()) {
             catchGestureInfo.setText(
-                    "全自動捕捉手勢：目前沒有可播放軌跡。\n" +
+                    "自動捕捉：目前沒有可播放軌跡。\n" +
                             "請先錄製手勢或套用一個保存版本。"
             );
             return;
         }
         long totalDuration = GestureIdentity.totalDuration(currentLayers);
         catchGestureInfo.setText(
-                "全自動會直接播放目前手勢：" + currentLayers.size() +
-                        " 條，總長 " + formatSeconds(totalDuration) +
-                        " 秒，指紋 " + currentFingerprint + "。\n" +
-                        "修改或套用保存版本後，不必再建立捕捉快照。"
+                "自動捕捉會播放目前手勢：" + currentLayers.size() +
+                        " 條，總長 " + formatSeconds(totalDuration) + " 秒。"
         );
     }
 

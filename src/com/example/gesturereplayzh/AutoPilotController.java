@@ -28,6 +28,7 @@ final class AutoPilotController {
     private long lastScreenshotRequestAt;
     private long unknownStartedAt;
     private int groundIndex;
+    private long lastListToggleAt;
 
     AutoPilotController(GestureAccessibilityService service) {
         this.service = service;
@@ -38,7 +39,7 @@ final class AutoPilotController {
     void start() {
         stop();
         if (!AutoSettings.load(service).autoEnabled) {
-            service.autoStatus("請先在 App 勾選允許全自動實驗功能");
+            service.autoStatus("請先在 App 勾選允許自動操作");
             return;
         }
         active = true;
@@ -46,6 +47,7 @@ final class AutoPilotController {
         blockedTargets.clear();
         groundIndex = 0;
         unknownStartedAt = 0L;
+        lastListToggleAt = 0L;
         service.autoStatus("自動流程已啟動：全螢幕搜尋 Pokémon 條列");
         schedule(400L, generation);
     }
@@ -132,14 +134,44 @@ final class AutoPilotController {
                     scanList(bitmap, token);
                     break;
                 default:
-                    recycle(bitmap);
-                    unknown(token, "未知畫面：安全等待，不觸控");
+                    PokemonListDetector.Result list = PokemonListDetector.find(bitmap);
+                    if (list.foundPanel()) {
+                        unknownStartedAt = 0L;
+                        Log.i(LOG_TAG, "map fallback accepted from list panel");
+                        scanList(bitmap, token, list);
+                    } else {
+                        recycle(bitmap);
+                        unknown(token, "未知畫面：安全等待，不觸控");
+                    }
             }
     }
 
     private void scanList(Bitmap bitmap, int token) {
+        scanList(bitmap, token, PokemonListDetector.find(bitmap));
+    }
+
+    private void scanList(
+            Bitmap bitmap,
+            int token,
+            PokemonListDetector.Result result
+    ) {
         cleanupBlocked();
-        PokemonListDetector.Result result = PokemonListDetector.find(bitmap);
+        long now = System.currentTimeMillis();
+        if (result.foundPanel() && result.isCollapsed(bitmap.getWidth())) {
+            if (result.toggle != null && now - lastListToggleAt > 2500L) {
+                PointF toggle = result.toggle;
+                lastListToggleAt = now;
+                recycle(bitmap);
+                service.autoStatus("找到收合的 Pokémon 條列，先按＝展開");
+                tap(toggle.x, toggle.y, token,
+                        () -> schedule(AutoSettings.load(service).postTapClassifyDelayMs, token));
+            } else {
+                recycle(bitmap);
+                service.autoStatus("等待 Pokémon 條列展開");
+                schedule(AutoSettings.load(service).scanIntervalMs, token);
+            }
+            return;
+        }
         PointF target = null;
         for (PointF candidate : result.candidates) {
             if (!isBlocked(candidate, bitmap.getWidth())) {
