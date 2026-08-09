@@ -29,7 +29,7 @@ final class AutoPilotController {
     private long lastScreenshotRequestAt;
     private long unknownStartedAt;
     private RectF lockedListRegion;
-    private RectF lockedMovementArrowRegion;
+    private PointF lockedMovementArrowPoint;
 
     AutoPilotController(GestureAccessibilityService service) {
         this.service = service;
@@ -37,7 +37,7 @@ final class AutoPilotController {
 
     boolean isActive() { return active; }
 
-    void start(RectF listRegion, RectF movementArrowRegion) {
+    void start(RectF listRegion, PointF movementArrowPoint) {
         stop();
         if (!AutoSettings.load(service).autoEnabled) {
             service.autoStatus("請先在 App 勾選允許自動操作");
@@ -47,12 +47,16 @@ final class AutoPilotController {
             service.autoStatus("條列框選範圍無效");
             return;
         }
-        if (movementArrowRegion == null || movementArrowRegion.isEmpty()) {
-            service.autoStatus("移動箭頭範圍無效");
+        if (movementArrowPoint == null) {
+            service.autoStatus("移動箭頭位置無效");
             return;
         }
         lockedListRegion = new RectF(listRegion);
-        lockedMovementArrowRegion = new RectF(movementArrowRegion);
+        android.graphics.Point screen = ScreenDimensions.get(service);
+        lockedMovementArrowPoint = new PointF(
+                Math.max(0f, Math.min(screen.x - 1f, movementArrowPoint.x)),
+                Math.max(0f, Math.min(screen.y - 1f, movementArrowPoint.y))
+        );
         active = true;
         generation++;
         blockedTargets.clear();
@@ -68,7 +72,7 @@ final class AutoPilotController {
         screenshotFailures = 0;
         unknownStartedAt = 0L;
         lockedListRegion = null;
-        lockedMovementArrowRegion = null;
+        lockedMovementArrowPoint = null;
         handler.removeCallbacksAndMessages(null);
     }
 
@@ -186,9 +190,13 @@ final class AutoPilotController {
                 return;
             }
             recycle(bitmap);
-            PointF arrow = selectedMovementArrowPoint();
+            PointF arrow = lockedMovementArrowPoint == null ? null :
+                    new PointF(
+                            lockedMovementArrowPoint.x,
+                            lockedMovementArrowPoint.y
+                    );
             if (arrow == null) {
-                service.autoStatus("移動箭頭框選區無效；已停止自動流程");
+                service.autoStatus("移動箭頭位置無效；已停止自動流程");
                 stop();
                 return;
             }
@@ -301,19 +309,6 @@ final class AutoPilotController {
                 point.x <= lockedListRegion.right - horizontalInset &&
                 point.y >= lockedListRegion.top + verticalInset &&
                 point.y <= lockedListRegion.bottom - verticalInset;
-    }
-
-    private PointF selectedMovementArrowPoint() {
-        if (lockedMovementArrowRegion == null ||
-                lockedMovementArrowRegion.isEmpty()) {
-            return null;
-        }
-        android.graphics.Point size = ScreenDimensions.get(service);
-        float x = Math.max(0f, Math.min(
-                size.x - 1f, lockedMovementArrowRegion.centerX()));
-        float y = Math.max(0f, Math.min(
-                size.y - 1f, lockedMovementArrowRegion.centerY()));
-        return new PointF(x, y);
     }
 
     private void holdMovementArrow(PointF arrow, int token) {

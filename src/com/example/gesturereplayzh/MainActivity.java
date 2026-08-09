@@ -178,7 +178,7 @@ public final class MainActivity extends Activity {
             ));
 
             TextView autoWarning = infoBox(
-                    "開始前請把地圖調成最大視野、最高角度。請依序框選條列辨識區，以及移動圓盤上的一個白色箭頭尖端；不要框圓盤中心。",
+                    "開始前請把地圖調成最大視野、最高角度。先框選條列辨識區；第二步直接點一下移動圓盤上的白色箭頭尖端，不要點圓盤中心。",
                     0xFFFFF3E0,
                     0xFF7A3E00
             );

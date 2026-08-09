@@ -350,7 +350,7 @@ public final class GestureAccessibilityService extends AccessibilityService {
                     public void onCancelled() {
                         pendingListRegion = null;
                         removeListRegionSelectionOverlay(true);
-                        toast("已取消框選");
+                        toast("已取消條列框選");
                     }
                 }
         );
@@ -374,31 +374,28 @@ public final class GestureAccessibilityService extends AccessibilityService {
             pendingListRegion = null;
             return;
         }
-        ListRegionSelectionView selector = new ListRegionSelectionView(
+        MovementPointSelectionView selector = new MovementPointSelectionView(
                 this,
-                "步驟 2/2：小框框住一個白色箭頭尖端（勿框中心）",
-                8f,
-                8f,
-                new ListRegionSelectionView.Listener() {
+                new MovementPointSelectionView.Listener() {
                     @Override
-                    public void onSelected(RectF movementArrowRegion) {
+                    public void onSelected(PointF movementArrowPoint) {
                         RectF listRegion = new RectF(pendingListRegion);
                         pendingListRegion = null;
                         removeListRegionSelectionOverlay(true);
                         if (autoPilotController == null) return;
                         autoPilotController.start(
                                 listRegion,
-                                movementArrowRegion
+                                movementArrowPoint
                         );
                         setAutoPanelRunning(true);
-                        toast("條列與移動箭頭已鎖定，自動流程開始");
+                        toast("條列與箭頭長按位置已鎖定，自動流程開始");
                     }
 
                     @Override
                     public void onCancelled() {
                         pendingListRegion = null;
                         removeListRegionSelectionOverlay(true);
-                        toast("已取消框選");
+                        toast("已取消箭頭位置選擇");
                     }
                 }
         );
