@@ -29,6 +29,7 @@ final class AutoPilotController {
     private long lastScreenshotRequestAt;
     private long unknownStartedAt;
     private int groundIndex;
+    private boolean groundTapUsedThisRound;
     private RectF lockedListRegion;
 
     AutoPilotController(GestureAccessibilityService service) {
@@ -52,6 +53,7 @@ final class AutoPilotController {
         generation++;
         blockedTargets.clear();
         groundIndex = 0;
+        groundTapUsedThisRound = false;
         unknownStartedAt = 0L;
         service.autoStatus("自動流程已啟動：只掃描框選條列");
         schedule(400L, generation);
@@ -63,6 +65,7 @@ final class AutoPilotController {
         screenshotPending = false;
         screenshotFailures = 0;
         unknownStartedAt = 0L;
+        groundTapUsedThisRound = false;
         lockedListRegion = null;
         handler.removeCallbacksAndMessages(null);
     }
@@ -174,17 +177,32 @@ final class AutoPilotController {
                 " candidates=" + result.candidates.size() +
                 " panel=" + result.panel);
         if (target == null) {
+            if (!result.candidates.isEmpty()) {
+                recycle(bitmap);
+                service.autoStatus("條列候選暫時封鎖，等待 10 秒後重查");
+                schedule(AutoSettings.load(service).scanIntervalMs, token);
+                return;
+            }
+            if (groundTapUsedThisRound) {
+                recycle(bitmap);
+                service.autoStatus("本輪已點過一次地板，等待條列出現寶可夢");
+                schedule(AutoSettings.load(service).scanIntervalMs, token);
+                return;
+            }
             PointF ground = nearestGroundPoint(bitmap, result.panel);
             recycle(bitmap);
             if (ground == null) {
                 service.autoStatus("未找到條列候選，也沒有安全移動點");
                 schedule(AutoSettings.load(service).scanIntervalMs, token);
             } else {
-                tap(ground.x, ground.y, token, () ->
-                        schedule(AutoSettings.load(service).groundMoveWaitMs, token));
+                tap(ground.x, ground.y, token, () -> {
+                    groundTapUsedThisRound = true;
+                    schedule(AutoSettings.load(service).groundMoveWaitMs, token);
+                });
             }
             return;
         }
+        groundTapUsedThisRound = false;
         recycle(bitmap);
         service.autoStatus("條列找到 " + result.candidates.size() +
                 " 個候選，點擊第一個");
@@ -284,8 +302,7 @@ final class AutoPilotController {
         };
         int w = bitmap.getWidth();
         int h = bitmap.getHeight();
-        int limit = Math.min(offsets.length,
-                AutoSettings.load(service).groundMoveRetries);
+        int limit = offsets.length;
         for (int tries = 0; tries < limit; tries++) {
             int index = (groundIndex + tries) % offsets.length;
             PointF p = new PointF(w * (.50f + offsets[index][0]),

@@ -174,11 +174,11 @@ public final class MainActivity extends Activity {
         if (isExperimentalBuild()) {
             root.addView(sectionTitle(
                     "② 自動操作",
-                    "每次按下懸浮「自」後，直接拖曳框住完整 Pokémon 條列。"
+                    "每次按下懸浮「自」後，開始自動捕捉寶可夢。"
             ));
 
             TextView autoWarning = infoBox(
-                    "開始前請把地圖調成最大視野、最高角度。自動操作仍可能誤判。",
+                    "開始前請把地圖調成最大視野、最高角度。框選設定中的辨識區時，請將懸浮物移出辨識區。",
                     0xFFFFF3E0,
                     0xFF7A3E00
             );
@@ -672,10 +672,9 @@ public final class MainActivity extends Activity {
                 "點擊附近地板後等待（秒）",
                 settings.groundMoveWaitMs / 1000f
         );
-        EditText groundMoveRetries = addIntegerField(
+        addFieldHelp(
                 fields,
-                "附近地板最多候選數（1～8）",
-                settings.groundMoveRetries
+                "每輪固定最多點擊地板 1 次；之後只掃描等待，直到條列重新出現候選。"
         );
         EditText unknownTimeout = addNumberField(
                 fields,
@@ -781,8 +780,6 @@ public final class MainActivity extends Activity {
                     postTapClassifyDelay, settings.postTapClassifyDelayMs);
             settings.groundMoveWaitMs = seconds(
                     groundMoveWait, settings.groundMoveWaitMs);
-            settings.groundMoveRetries = integerValue(
-                    groundMoveRetries, settings.groundMoveRetries, 1, 8);
             settings.unknownTimeoutMs = seconds(
                     unknownTimeout,
                     settings.unknownTimeoutMs

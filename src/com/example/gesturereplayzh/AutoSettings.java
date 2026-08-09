@@ -15,7 +15,6 @@ final class AutoSettings {
     long afterCatchMs;
     long afterExitMs;
     long groundMoveWaitMs;
-    int groundMoveRetries;
     int rocketTapCount;
     float rocketTapXRatio;
     float rocketTapYRatio;
@@ -50,6 +49,8 @@ final class AutoSettings {
                 .remove("exitXRatio")
                 .remove("exitYRatio")
                 .remove("catchGestureSourceId")
+                .remove("groundMoveRetries")
+                .remove("blockedDurationMs")
                 .apply();
         AutoSettings s = defaults();
         s.scanIntervalMs = readTime(p, "scanIntervalMs", s.scanIntervalMs);
@@ -62,13 +63,11 @@ final class AutoSettings {
         s.afterCatchMs = readTime(p, "afterCatchMs", s.afterCatchMs);
         s.afterExitMs = readTime(p, "afterExitMs", s.afterExitMs);
         s.groundMoveWaitMs = readTime(p, "groundMoveWaitMs", s.groundMoveWaitMs);
-        s.groundMoveRetries = clamp(p.getInt("groundMoveRetries", s.groundMoveRetries), 1, 8);
         s.rocketTapCount = clamp(p.getInt("rocketTapCount", s.rocketTapCount), 1, 5);
         s.rocketTapXRatio = readRatio(p, "rocketTapXRatio", s.rocketTapXRatio);
         s.rocketTapYRatio = readRatio(p, "rocketTapYRatio", s.rocketTapYRatio);
         s.autoEnabled = p.getBoolean("autoEnabled", false);
         s.unknownTimeoutMs = readTime(p, "unknownTimeoutMs", s.unknownTimeoutMs);
-        s.blockedDurationMs = readTime(p, "blockedDurationMs", s.blockedDurationMs);
         s.blockedRadiusRatio = clamp(p.getFloat("blockedRadiusRatio", s.blockedRadiusRatio), .01f, .20f);
         s.blockedMaxCount = clamp(p.getInt("blockedMaxCount", s.blockedMaxCount), 1, 200);
         s.encounterUseCamera = p.getBoolean(
@@ -94,13 +93,11 @@ final class AutoSettings {
                 .putLong("afterCatchMs", normalizeTime(afterCatchMs))
                 .putLong("afterExitMs", normalizeTime(afterExitMs))
                 .putLong("groundMoveWaitMs", normalizeTime(groundMoveWaitMs))
-                .putInt("groundMoveRetries", clamp(groundMoveRetries, 1, 8))
                 .putInt("rocketTapCount", clamp(rocketTapCount, 1, 5))
                 .putFloat("rocketTapXRatio", normalizeRatio(rocketTapXRatio))
                 .putFloat("rocketTapYRatio", normalizeRatio(rocketTapYRatio))
                 .putBoolean("autoEnabled", autoEnabled)
                 .putLong("unknownTimeoutMs", normalizeTime(unknownTimeoutMs))
-                .putLong("blockedDurationMs", normalizeTime(blockedDurationMs))
                 .putFloat("blockedRadiusRatio", clamp(blockedRadiusRatio, .01f, .20f))
                 .putInt("blockedMaxCount", clamp(blockedMaxCount, 1, 200))
                 .putBoolean("encounterUseCamera", encounterUseCamera)
@@ -126,13 +123,12 @@ final class AutoSettings {
         s.afterCatchMs = 2000L;
         s.afterExitMs = 1000L;
         s.groundMoveWaitMs = 1200L;
-        s.groundMoveRetries = 4;
         s.rocketTapCount = 2;
         s.rocketTapXRatio = .50f;
         s.rocketTapYRatio = .69f;
         s.autoEnabled = false;
         s.unknownTimeoutMs = 15000L;
-        s.blockedDurationMs = 60000L;
+        s.blockedDurationMs = 10000L;
         s.blockedRadiusRatio = .07f;
         s.blockedMaxCount = 40;
         s.encounterUseCamera = true;
