@@ -17,14 +17,20 @@ final class ListRegionSelectionView extends View {
 
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Listener listener;
+    private final String instruction;
     private final float density;
     private final RectF selection = new RectF();
     private float startX;
     private float startY;
     private boolean dragging;
 
-    ListRegionSelectionView(Context context, Listener listener) {
+    ListRegionSelectionView(
+            Context context,
+            String instruction,
+            Listener listener
+    ) {
         super(context);
+        this.instruction = instruction;
         this.listener = listener;
         density = getResources().getDisplayMetrics().density;
         setBackgroundColor(Color.TRANSPARENT);
@@ -50,7 +56,7 @@ final class ListRegionSelectionView extends View {
         paint.setColor(Color.WHITE);
         paint.setTextSize(16f * density);
         canvas.drawText(
-                "拖曳框住完整條列；點一下取消",
+                instruction,
                 24f * density,
                 49f * density,
                 paint
@@ -89,8 +95,8 @@ final class ListRegionSelectionView extends View {
                 dragging = false;
                 updateSelection(x, y);
                 invalidate();
-                if (selection.width() < 42f * density ||
-                        selection.height() < 110f * density) {
+                if (selection.width() < 24f * density ||
+                        selection.height() < 48f * density) {
                     listener.onCancelled();
                 } else {
                     listener.onSelected(new RectF(selection));

@@ -28,9 +28,9 @@ final class AutoPilotController {
     private int generation;
     private long lastScreenshotRequestAt;
     private long unknownStartedAt;
-    private int groundIndex;
     private boolean groundTapUsedThisRound;
     private RectF lockedListRegion;
+    private RectF lockedGroundRegion;
 
     AutoPilotController(GestureAccessibilityService service) {
         this.service = service;
@@ -38,7 +38,7 @@ final class AutoPilotController {
 
     boolean isActive() { return active; }
 
-    void start(RectF listRegion) {
+    void start(RectF listRegion, RectF groundRegion) {
         stop();
         if (!AutoSettings.load(service).autoEnabled) {
             service.autoStatus("請先在 App 勾選允許自動操作");
@@ -48,14 +48,18 @@ final class AutoPilotController {
             service.autoStatus("條列框選範圍無效");
             return;
         }
+        if (groundRegion == null || groundRegion.isEmpty()) {
+            service.autoStatus("地板點擊範圍無效");
+            return;
+        }
         lockedListRegion = new RectF(listRegion);
+        lockedGroundRegion = new RectF(groundRegion);
         active = true;
         generation++;
         blockedTargets.clear();
-        groundIndex = 0;
         groundTapUsedThisRound = false;
         unknownStartedAt = 0L;
-        service.autoStatus("自動流程已啟動：只掃描框選條列");
+        service.autoStatus("自動流程已啟動：地圖只使用兩個框選區");
         schedule(400L, generation);
     }
 
@@ -67,6 +71,7 @@ final class AutoPilotController {
         unknownStartedAt = 0L;
         groundTapUsedThisRound = false;
         lockedListRegion = null;
+        lockedGroundRegion = null;
         handler.removeCallbacksAndMessages(null);
     }
 
@@ -183,23 +188,28 @@ final class AutoPilotController {
                 schedule(AutoSettings.load(service).scanIntervalMs, token);
                 return;
             }
+            recycle(bitmap);
             if (groundTapUsedThisRound) {
-                recycle(bitmap);
-                service.autoStatus("本輪已點過一次地板，等待條列出現寶可夢");
+                service.autoStatus("本輪已點過地板區一次；只重新掃描條列");
                 schedule(AutoSettings.load(service).scanIntervalMs, token);
                 return;
             }
-            PointF ground = nearestGroundPoint(bitmap, result.panel);
-            recycle(bitmap);
+            PointF ground = selectedGroundPoint();
             if (ground == null) {
-                service.autoStatus("未找到條列候選，也沒有安全移動點");
-                schedule(AutoSettings.load(service).scanIntervalMs, token);
-            } else {
-                tap(ground.x, ground.y, token, () -> {
-                    groundTapUsedThisRound = true;
-                    schedule(AutoSettings.load(service).groundMoveWaitMs, token);
-                });
+                service.autoStatus("地板框選區無效；已停止自動流程");
+                stop();
+                return;
             }
+            tap(ground.x, ground.y, token, () -> {
+                groundTapUsedThisRound = true;
+                schedule(AutoSettings.load(service).groundMoveWaitMs, token);
+            });
+            return;
+        }
+        if (!isInsideLockedRegion(target)) {
+            recycle(bitmap);
+            service.autoStatus("候選超出框選區，已拒絕點擊");
+            schedule(AutoSettings.load(service).scanIntervalMs, token);
             return;
         }
         groundTapUsedThisRound = false;
@@ -295,26 +305,24 @@ final class AutoPilotController {
                         settings.rocketTapIntervalMs));
     }
 
-    private PointF nearestGroundPoint(Bitmap bitmap, android.graphics.RectF panel) {
-        float[][] offsets = {
-                {0f, -.10f}, {.075f, -.075f}, {-.075f, -.075f},
-                {.10f, -.02f}, {-.10f, -.02f}, {0f, .07f}
-        };
-        int w = bitmap.getWidth();
-        int h = bitmap.getHeight();
-        int limit = offsets.length;
-        for (int tries = 0; tries < limit; tries++) {
-            int index = (groundIndex + tries) % offsets.length;
-            PointF p = new PointF(w * (.50f + offsets[index][0]),
-                    h * (.63f + offsets[index][1]));
-            if ((panel == null || panel.isEmpty() || !panel.contains(p.x, p.y)) &&
-                    !isBlocked(p, w) && p.y < h * .84f) {
-                groundIndex = index + 1;
-                block(p);
-                return p;
-            }
+    private boolean isInsideLockedRegion(PointF point) {
+        if (lockedListRegion == null || lockedListRegion.isEmpty()) return false;
+        float horizontalInset = Math.max(2f, lockedListRegion.width() * .08f);
+        float verticalInset = Math.max(2f, lockedListRegion.height() * .03f);
+        return point.x >= lockedListRegion.left + horizontalInset &&
+                point.x <= lockedListRegion.right - horizontalInset &&
+                point.y >= lockedListRegion.top + verticalInset &&
+                point.y <= lockedListRegion.bottom - verticalInset;
+    }
+
+    private PointF selectedGroundPoint() {
+        if (lockedGroundRegion == null || lockedGroundRegion.isEmpty()) {
+            return null;
         }
-        return null;
+        android.graphics.Point size = ScreenDimensions.get(service);
+        float x = Math.max(0f, Math.min(size.x - 1f, lockedGroundRegion.centerX()));
+        float y = Math.max(0f, Math.min(size.y - 1f, lockedGroundRegion.centerY()));
+        return new PointF(x, y);
     }
 
     private void unknown(int token, String status) {

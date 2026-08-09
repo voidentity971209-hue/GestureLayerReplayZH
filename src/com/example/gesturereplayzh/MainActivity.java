@@ -178,7 +178,7 @@ public final class MainActivity extends Activity {
             ));
 
             TextView autoWarning = infoBox(
-                    "開始前請把地圖調成最大視野、最高角度。框選設定中的辨識區時，請將懸浮物移出辨識區。",
+                    "開始前請把地圖調成最大視野、最高角度。請依序框選條列辨識區與地板點擊區，並將其他懸浮物移出兩個區域。",
                     0xFFFFF3E0,
                     0xFF7A3E00
             );
@@ -669,12 +669,12 @@ public final class MainActivity extends Activity {
         );
         EditText groundMoveWait = addNumberField(
                 fields,
-                "點擊附近地板後等待（秒）",
+                "點擊所選地板區後等待（秒）",
                 settings.groundMoveWaitMs / 1000f
         );
         addFieldHelp(
                 fields,
-                "每輪固定最多點擊地板 1 次；之後只掃描等待，直到條列重新出現候選。"
+                "條列空白時只點所選地板區中央；每輪最多 1 次。"
         );
         EditText unknownTimeout = addNumberField(
                 fields,

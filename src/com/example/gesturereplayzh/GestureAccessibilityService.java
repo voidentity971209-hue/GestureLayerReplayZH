@@ -49,6 +49,7 @@ public final class GestureAccessibilityService extends AccessibilityService {
     private AutoPilotController autoPilotController;
     private Button autoControlButton;
     private View listRegionSelectionOverlay;
+    private RectF pendingListRegion;
     private long lastDrivingConfirmationAt;
 
     static GestureAccessibilityService getInstance() {
@@ -334,18 +335,61 @@ public final class GestureAccessibilityService extends AccessibilityService {
         }
         ListRegionSelectionView selector = new ListRegionSelectionView(
                 this,
+                "步驟 1/2：框選寶可夢條列辨識區",
                 new ListRegionSelectionView.Listener() {
                     @Override
                     public void onSelected(RectF region) {
-                        removeListRegionSelectionOverlay(true);
-                        if (autoPilotController == null) return;
-                        autoPilotController.start(region);
-                        setAutoPanelRunning(true);
-                        toast("條列範圍已鎖定，自動流程開始");
+                        pendingListRegion = new RectF(region);
+                        removeListRegionSelectionOverlay(false);
+                        beginGroundRegionSelection();
                     }
 
                     @Override
                     public void onCancelled() {
+                        pendingListRegion = null;
+                        removeListRegionSelectionOverlay(true);
+                        toast("已取消框選");
+                    }
+                }
+        );
+        WindowManager.LayoutParams params = new WindowManager.LayoutParams(
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN |
+                        WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                PixelFormat.TRANSLUCENT
+        );
+        params.gravity = Gravity.TOP | Gravity.START;
+        listRegionSelectionOverlay = selector;
+        windowManager.addView(selector, params);
+    }
+
+    private void beginGroundRegionSelection() {
+        if (windowManager == null || listRegionSelectionOverlay != null ||
+                pendingListRegion == null) {
+            removeListRegionSelectionOverlay(true);
+            pendingListRegion = null;
+            return;
+        }
+        ListRegionSelectionView selector = new ListRegionSelectionView(
+                this,
+                "步驟 2/2：框選條列空白時可點的地板區",
+                new ListRegionSelectionView.Listener() {
+                    @Override
+                    public void onSelected(RectF groundRegion) {
+                        RectF listRegion = new RectF(pendingListRegion);
+                        pendingListRegion = null;
+                        removeListRegionSelectionOverlay(true);
+                        if (autoPilotController == null) return;
+                        autoPilotController.start(listRegion, groundRegion);
+                        setAutoPanelRunning(true);
+                        toast("兩個範圍已鎖定，自動流程開始");
+                    }
+
+                    @Override
+                    public void onCancelled() {
+                        pendingListRegion = null;
                         removeListRegionSelectionOverlay(true);
                         toast("已取消框選");
                     }
@@ -372,6 +416,9 @@ public final class GestureAccessibilityService extends AccessibilityService {
                 // The system may already have detached the accessibility overlay.
             }
             listRegionSelectionOverlay = null;
+        }
+        if (restoreControls) {
+            pendingListRegion = null;
         }
         if (restoreControls && floatingControls != null) {
             floatingControls.setVisibility(View.VISIBLE);

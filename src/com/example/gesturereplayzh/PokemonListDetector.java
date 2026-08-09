@@ -43,8 +43,8 @@ final class PokemonListDetector {
                 clamp(requestedPanel.right, 1f, bitmap.getWidth()),
                 clamp(requestedPanel.bottom, 1f, bitmap.getHeight())
         );
-        if (panel.width() < bitmap.getWidth() * .045f ||
-                panel.height() < bitmap.getHeight() * .12f) {
+        if (panel.width() < bitmap.getWidth() * .025f ||
+                panel.height() < bitmap.getHeight() * .04f) {
             return new Result(new RectF(), Collections.emptyList(), 0f, null);
         }
         PointF equalsAnchor = findEqualsAnchor(bitmap, panel);
@@ -403,6 +403,12 @@ final class PokemonListDetector {
             PointF equalsAnchor
     ) {
         int h = b.getHeight();
+        RectF contentPanel = new RectF(
+                panel.left + panel.width() * .20f,
+                panel.top,
+                panel.right - panel.width() * .20f,
+                panel.bottom
+        );
         float topExclusion = Math.max(h * .018f, panel.height() * .075f);
         float bottomExclusion = Math.max(h * .025f, panel.height() * .17f);
         int start = Math.round(panel.top + topExclusion);
@@ -420,8 +426,8 @@ final class PokemonListDetector {
         for (int y = start; y <= end; y += step) {
             scores.add(new RowScore(
                     y,
-                    rowScore(b, panel, y, h * .032f),
-                    rowColorfulRatio(b, panel, y, h * .032f)
+                    rowScore(b, contentPanel, y, h * .032f),
+                    rowColorfulRatio(b, contentPanel, y, h * .032f)
             ));
         }
         scores.sort((a, c) -> Float.compare(c.score, a.score));
@@ -443,7 +449,7 @@ final class PokemonListDetector {
         chosen.sort(Comparator.comparingInt(a -> a.y));
         List<PointF> result = new ArrayList<>();
         for (RowScore row : chosen) {
-            result.add(new PointF(findRowCenterX(b, panel, row.y), row.y));
+            result.add(new PointF(panel.centerX(), row.y));
         }
         return result;
     }
