@@ -9,6 +9,7 @@ import android.graphics.Point;
 import android.graphics.PixelFormat;
 import android.graphics.PointF;
 import android.graphics.Rect;
+import android.graphics.RectF;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
@@ -47,6 +48,7 @@ public final class GestureAccessibilityService extends AccessibilityService {
     private boolean gestureInFlight;
     private AutoPilotController autoPilotController;
     private Button autoControlButton;
+    private View listRegionSelectionOverlay;
     private long lastDrivingConfirmationAt;
 
     static GestureAccessibilityService getInstance() {
@@ -157,6 +159,7 @@ public final class GestureAccessibilityService extends AccessibilityService {
     }
 
     void stopPlayback() {
+        removeListRegionSelectionOverlay(true);
         if (autoPilotController != null) {
             autoPilotController.stop();
         }
@@ -297,8 +300,7 @@ public final class GestureAccessibilityService extends AccessibilityService {
                         return;
                     }
                     cancelGesturePlayback();
-                    autoPilotController.start();
-                    setAutoPanelRunning(true);
+                    beginListRegionSelection();
                 }
             });
         }
@@ -312,10 +314,64 @@ public final class GestureAccessibilityService extends AccessibilityService {
     }
 
     void hideFloatingControls() {
+        removeListRegionSelectionOverlay(false);
         if (floatingControls != null && windowManager != null) {
             windowManager.removeView(floatingControls);
             floatingControls = null;
             autoControlButton = null;
+        }
+    }
+
+    private void beginListRegionSelection() {
+        if (windowManager == null || listRegionSelectionOverlay != null) {
+            return;
+        }
+        if (floatingControls != null) {
+            floatingControls.setVisibility(View.INVISIBLE);
+        }
+        ListRegionSelectionView selector = new ListRegionSelectionView(
+                this,
+                new ListRegionSelectionView.Listener() {
+                    @Override
+                    public void onSelected(RectF region) {
+                        removeListRegionSelectionOverlay(true);
+                        if (autoPilotController == null) return;
+                        autoPilotController.start(region);
+                        setAutoPanelRunning(true);
+                        toast("條列範圍已鎖定，自動流程開始");
+                    }
+
+                    @Override
+                    public void onCancelled() {
+                        removeListRegionSelectionOverlay(true);
+                        toast("已取消框選");
+                    }
+                }
+        );
+        WindowManager.LayoutParams params = new WindowManager.LayoutParams(
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN |
+                        WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                PixelFormat.TRANSLUCENT
+        );
+        params.gravity = Gravity.TOP | Gravity.START;
+        listRegionSelectionOverlay = selector;
+        windowManager.addView(selector, params);
+    }
+
+    private void removeListRegionSelectionOverlay(boolean restoreControls) {
+        if (listRegionSelectionOverlay != null && windowManager != null) {
+            try {
+                windowManager.removeView(listRegionSelectionOverlay);
+            } catch (IllegalArgumentException ignored) {
+                // The system may already have detached the accessibility overlay.
+            }
+            listRegionSelectionOverlay = null;
+        }
+        if (restoreControls && floatingControls != null) {
+            floatingControls.setVisibility(View.VISIBLE);
         }
     }
 

@@ -24,6 +24,10 @@ final class AutoSettings {
     long blockedDurationMs;
     float blockedRadiusRatio;
     int blockedMaxCount;
+    boolean encounterUseCamera;
+    boolean encounterUseCpPanel;
+    boolean encounterUseSideDocks;
+    boolean encounterUseBall;
 
     static AutoSettings load(Context context) {
         SharedPreferences p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
@@ -67,6 +71,14 @@ final class AutoSettings {
         s.blockedDurationMs = readTime(p, "blockedDurationMs", s.blockedDurationMs);
         s.blockedRadiusRatio = clamp(p.getFloat("blockedRadiusRatio", s.blockedRadiusRatio), .01f, .20f);
         s.blockedMaxCount = clamp(p.getInt("blockedMaxCount", s.blockedMaxCount), 1, 200);
+        s.encounterUseCamera = p.getBoolean(
+                "encounterUseCamera", s.encounterUseCamera);
+        s.encounterUseCpPanel = p.getBoolean(
+                "encounterUseCpPanel", s.encounterUseCpPanel);
+        s.encounterUseSideDocks = p.getBoolean(
+                "encounterUseSideDocks", s.encounterUseSideDocks);
+        s.encounterUseBall = p.getBoolean(
+                "encounterUseBall", s.encounterUseBall);
         return s;
     }
 
@@ -91,6 +103,10 @@ final class AutoSettings {
                 .putLong("blockedDurationMs", normalizeTime(blockedDurationMs))
                 .putFloat("blockedRadiusRatio", clamp(blockedRadiusRatio, .01f, .20f))
                 .putInt("blockedMaxCount", clamp(blockedMaxCount, 1, 200))
+                .putBoolean("encounterUseCamera", encounterUseCamera)
+                .putBoolean("encounterUseCpPanel", encounterUseCpPanel)
+                .putBoolean("encounterUseSideDocks", encounterUseSideDocks)
+                .putBoolean("encounterUseBall", encounterUseBall)
                 .apply();
     }
 
@@ -119,6 +135,10 @@ final class AutoSettings {
         s.blockedDurationMs = 60000L;
         s.blockedRadiusRatio = .07f;
         s.blockedMaxCount = 40;
+        s.encounterUseCamera = true;
+        s.encounterUseCpPanel = true;
+        s.encounterUseSideDocks = false;
+        s.encounterUseBall = true;
         return s;
     }
 

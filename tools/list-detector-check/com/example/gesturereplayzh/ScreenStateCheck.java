@@ -15,7 +15,8 @@ public final class ScreenStateCheck {
         for (String path : args) {
             Bitmap bitmap = new Bitmap(ImageIO.read(new File(path)));
             System.out.println(path + "=" +
-                    AutoScreenAnalyzer.classifyAfterTap(bitmap, null) +
+                    AutoScreenAnalyzer.classifyAfterTap(
+                            bitmap, null, new AutoSettings()) +
                     " context=" + invokeBoolean("looksLikeEncounterContext", bitmap) +
                     " docks=" + invokeBoolean("looksLikeEncounterSideDocks", bitmap) +
                     " map=" + invokeBoolean("looksLikeMapScreen", bitmap) +

@@ -33,6 +33,34 @@ final class PokemonListDetector {
 
     private PokemonListDetector() {}
 
+    static Result findLocked(Bitmap bitmap, RectF requestedPanel) {
+        if (bitmap == null || requestedPanel == null || requestedPanel.isEmpty()) {
+            return new Result(new RectF(), Collections.emptyList(), 0f, null);
+        }
+        RectF panel = new RectF(
+                clamp(requestedPanel.left, 0f, bitmap.getWidth() - 1f),
+                clamp(requestedPanel.top, 0f, bitmap.getHeight() - 1f),
+                clamp(requestedPanel.right, 1f, bitmap.getWidth()),
+                clamp(requestedPanel.bottom, 1f, bitmap.getHeight())
+        );
+        if (panel.width() < bitmap.getWidth() * .045f ||
+                panel.height() < bitmap.getHeight() * .12f) {
+            return new Result(new RectF(), Collections.emptyList(), 0f, null);
+        }
+        PointF equalsAnchor = findEqualsAnchor(bitmap, panel);
+        List<PointF> points = findRowsLocked(
+                bitmap,
+                panel,
+                equalsAnchor
+        );
+        return new Result(
+                panel,
+                points,
+                Math.min(1f, .82f + points.size() * .025f),
+                equalsAnchor
+        );
+    }
+
     static Result find(Bitmap bitmap) {
         int w = bitmap.getWidth();
         int h = bitmap.getHeight();
@@ -360,6 +388,57 @@ final class PokemonListDetector {
             }
             if (!near) chosen.add(row);
             if (chosen.size() >= 8) break;
+        }
+        chosen.sort(Comparator.comparingInt(a -> a.y));
+        List<PointF> result = new ArrayList<>();
+        for (RowScore row : chosen) {
+            result.add(new PointF(findRowCenterX(b, panel, row.y), row.y));
+        }
+        return result;
+    }
+
+    private static List<PointF> findRowsLocked(
+            Bitmap b,
+            RectF panel,
+            PointF equalsAnchor
+    ) {
+        int h = b.getHeight();
+        float topExclusion = Math.max(h * .018f, panel.height() * .075f);
+        float bottomExclusion = Math.max(h * .025f, panel.height() * .17f);
+        int start = Math.round(panel.top + topExclusion);
+        if (equalsAnchor != null) {
+            start = Math.max(
+                    start,
+                    Math.round(equalsAnchor.y + panel.height() * .045f)
+            );
+        }
+        int end = Math.round(panel.bottom - bottomExclusion);
+        if (end <= start) return Collections.emptyList();
+
+        int step = Math.max(4, h / 220);
+        List<RowScore> scores = new ArrayList<>();
+        for (int y = start; y <= end; y += step) {
+            scores.add(new RowScore(
+                    y,
+                    rowScore(b, panel, y, h * .032f),
+                    rowColorfulRatio(b, panel, y, h * .032f)
+            ));
+        }
+        scores.sort((a, c) -> Float.compare(c.score, a.score));
+        List<RowScore> chosen = new ArrayList<>();
+        float minDistance = Math.max(h * .055f, panel.height() * .070f);
+        for (RowScore row : scores) {
+            if (row.score < .105f) break;
+            if (row.colorfulRatio < .045f) continue;
+            boolean near = false;
+            for (RowScore accepted : chosen) {
+                if (Math.abs(row.y - accepted.y) < minDistance) {
+                    near = true;
+                    break;
+                }
+            }
+            if (!near) chosen.add(row);
+            if (chosen.size() >= 10) break;
         }
         chosen.sort(Comparator.comparingInt(a -> a.y));
         List<PointF> result = new ArrayList<>();

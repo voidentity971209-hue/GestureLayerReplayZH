@@ -174,7 +174,7 @@ public final class MainActivity extends Activity {
         if (isExperimentalBuild()) {
             root.addView(sectionTitle(
                     "② 自動操作",
-                    "全畫面尋找固定 Pokémon 長條；白色＝只用來定位，程式不會點擊它。"
+                    "每次按下懸浮「自」後，直接拖曳框住完整 Pokémon 條列。"
             ));
 
             TextView autoWarning = infoBox(
@@ -586,7 +586,7 @@ public final class MainActivity extends Activity {
         ));
 
         TextView explanation = text(
-                "只保留目前流程會使用的等待時間與次數。畫面辨識規則固定。",
+                "可調整等待時間、次數，以及捕捉畫面要使用的判定項目。",
                 14f,
                 0xFF555555
         );
@@ -623,6 +623,34 @@ public final class MainActivity extends Activity {
         addFieldHelp(
                 fields,
                 "預設 1 張最省電；提高數量會較慢。條列位置每次動作後都會重新掃描。"
+        );
+        TextView encounterCriteriaTitle = text(
+                "捕捉畫面判定項目（至少勾選一項）",
+                16f,
+                Color.BLACK
+        );
+        encounterCriteriaTitle.setPadding(0, dp(14), 0, dp(4));
+        fields.addView(encounterCriteriaTitle);
+        CheckBox encounterUseCamera = new CheckBox(this);
+        encounterUseCamera.setText("上方中央相機區");
+        encounterUseCamera.setChecked(settings.encounterUseCamera);
+        fields.addView(encounterUseCamera);
+        CheckBox encounterUseCpPanel = new CheckBox(this);
+        encounterUseCpPanel.setText("名稱／CP 區域");
+        encounterUseCpPanel.setChecked(settings.encounterUseCpPanel);
+        fields.addView(encounterUseCpPanel);
+        CheckBox encounterUseSideDocks = new CheckBox(this);
+        encounterUseSideDocks.setText("左下樹果與右下球種功能欄");
+        encounterUseSideDocks.setChecked(settings.encounterUseSideDocks);
+        fields.addView(encounterUseSideDocks);
+        CheckBox encounterUseBall = new CheckBox(this);
+        encounterUseBall.setText("下方中央大型精靈球");
+        encounterUseBall.setChecked(settings.encounterUseBall);
+        fields.addView(encounterUseBall);
+        addFieldHelp(
+                fields,
+                "勾選的項目都必須成立才會播放捕捉手勢。" +
+                        "若某個外掛介面經常遮住某一項，可以取消該項。"
         );
         EditText listTapCount = addIntegerField(
                 fields,
@@ -730,6 +758,13 @@ public final class MainActivity extends Activity {
         });
         cancel.setOnClickListener(v -> dialog.dismiss());
         save.setOnClickListener(v -> {
+            if (!encounterUseCamera.isChecked() &&
+                    !encounterUseCpPanel.isChecked() &&
+                    !encounterUseSideDocks.isChecked() &&
+                    !encounterUseBall.isChecked()) {
+                toast("捕捉畫面判定至少要勾選一項");
+                return;
+            }
             settings.scanIntervalMs =
                     seconds(scanInterval, settings.scanIntervalMs);
             settings.recognitionFrameCount = integerValue(
@@ -762,6 +797,10 @@ public final class MainActivity extends Activity {
                     seconds(afterExit, settings.afterExitMs);
             settings.rocketTapCount =
                     integerValue(rocketCount, settings.rocketTapCount, 1, 5);
+            settings.encounterUseCamera = encounterUseCamera.isChecked();
+            settings.encounterUseCpPanel = encounterUseCpPanel.isChecked();
+            settings.encounterUseSideDocks = encounterUseSideDocks.isChecked();
+            settings.encounterUseBall = encounterUseBall.isChecked();
             settings.save(this);
             dialog.dismiss();
             refreshCatchGestureInfo();

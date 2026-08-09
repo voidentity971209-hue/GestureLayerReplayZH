@@ -98,12 +98,20 @@ final class AutoScreenAnalyzer {
             Bitmap bitmap,
             FrameSignature mapBeforeTap
     ) {
+        return classifyAfterTap(bitmap, mapBeforeTap, null);
+    }
+
+    static ScreenState classifyAfterTap(
+            Bitmap bitmap,
+            FrameSignature mapBeforeTap,
+            AutoSettings settings
+    ) {
         // Do not use the flee/running icon: skins and versions move or replace
         // it.  Encounter identity comes from the stable capture layout.
-        if (looksLikeEncounterReady(bitmap)) {
+        if (looksLikeEncounterReady(bitmap, settings)) {
             return ScreenState.ENCOUNTER;
         }
-        if (looksLikeCaptureAnimation(bitmap)) {
+        if (looksLikeCaptureAnimation(bitmap, settings)) {
             return ScreenState.ENCOUNTER_WAIT;
         }
         if (looksLikeRocketDialog(bitmap)) {
@@ -1223,6 +1231,14 @@ final class AutoScreenAnalyzer {
                 findEncounterBallCircleScore(bitmap) >= 0.10f;
     }
 
+    private static boolean looksLikeEncounterReady(
+            Bitmap bitmap,
+            AutoSettings settings
+    ) {
+        if (settings == null) return looksLikeEncounterReady(bitmap);
+        return matchesSelectedEncounterEvidence(bitmap, settings, 0.10f);
+    }
+
     static boolean isStrictMapScreen(Bitmap bitmap) {
         return looksLikeMapScreen(bitmap);
     }
@@ -1295,19 +1311,8 @@ final class AutoScreenAnalyzer {
     }
 
     private static boolean looksLikeEncounterContext(Bitmap bitmap) {
-        RegionStats cameraControl =
-                stats(bitmap, 0.38f, 0.035f, 0.62f, 0.15f);
-        RegionStats cpPanel =
-                stats(bitmap, 0.16f, 0.24f, 0.84f, 0.44f);
-        boolean cameraAnchor = cameraControl.whiteRatio > 0.005f &&
-                cameraControl.edgeRatio > 0.012f;
-        boolean cpAnchor = cpPanel.edgeRatio > 0.025f &&
-                cpPanel.edgeRatio < 0.30f &&
-                (
-                        cpPanel.whiteRatio > 0.004f ||
-                                cpPanel.darkRatio > 0.025f ||
-                                cpPanel.edgeRatio > 0.10f
-                );
+        boolean cameraAnchor = looksLikeEncounterCamera(bitmap);
+        boolean cpAnchor = looksLikeEncounterCpPanel(bitmap);
         boolean bottomAnchor = looksLikeEncounterSideDocks(bitmap) ||
                 findEncounterBallCircleScore(bitmap) >= 0.55f;
         return cameraAnchor && cpAnchor && bottomAnchor &&
@@ -1317,6 +1322,60 @@ final class AutoScreenAnalyzer {
     private static boolean looksLikeCaptureAnimation(Bitmap bitmap) {
         return looksLikeEncounterContext(bitmap) &&
                 findEncounterBallCircleScore(bitmap) >= 0.055f;
+    }
+
+    private static boolean looksLikeCaptureAnimation(
+            Bitmap bitmap,
+            AutoSettings settings
+    ) {
+        if (settings == null) return looksLikeCaptureAnimation(bitmap);
+        return matchesSelectedEncounterEvidence(bitmap, settings, 0.055f);
+    }
+
+    private static boolean matchesSelectedEncounterEvidence(
+            Bitmap bitmap,
+            AutoSettings settings,
+            float ballThreshold
+    ) {
+        int enabled = 0;
+        if (settings.encounterUseCamera) {
+            enabled++;
+            if (!looksLikeEncounterCamera(bitmap)) return false;
+        }
+        if (settings.encounterUseCpPanel) {
+            enabled++;
+            if (!looksLikeEncounterCpPanel(bitmap)) return false;
+        }
+        if (settings.encounterUseSideDocks) {
+            enabled++;
+            if (!looksLikeEncounterSideDocks(bitmap)) return false;
+        }
+        if (settings.encounterUseBall) {
+            enabled++;
+            if (findEncounterBallCircleScore(bitmap) < ballThreshold) {
+                return false;
+            }
+        }
+        return enabled > 0 && !looksLikeMapScreenRelaxed(bitmap);
+    }
+
+    private static boolean looksLikeEncounterCamera(Bitmap bitmap) {
+        RegionStats cameraControl =
+                stats(bitmap, 0.38f, 0.035f, 0.62f, 0.15f);
+        return cameraControl.whiteRatio > 0.005f &&
+                cameraControl.edgeRatio > 0.012f;
+    }
+
+    private static boolean looksLikeEncounterCpPanel(Bitmap bitmap) {
+        RegionStats cpPanel =
+                stats(bitmap, 0.16f, 0.24f, 0.84f, 0.44f);
+        return cpPanel.edgeRatio > 0.025f &&
+                cpPanel.edgeRatio < 0.30f &&
+                (
+                        cpPanel.whiteRatio > 0.004f ||
+                                cpPanel.darkRatio > 0.025f ||
+                                cpPanel.edgeRatio > 0.10f
+                );
     }
 
     private static boolean looksLikeEncounterSideDocks(Bitmap bitmap) {

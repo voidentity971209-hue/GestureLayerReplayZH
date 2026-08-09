@@ -4,6 +4,7 @@ import android.accessibilityservice.AccessibilityService;
 import android.graphics.Bitmap;
 import android.graphics.ColorSpace;
 import android.graphics.PointF;
+import android.graphics.RectF;
 import android.hardware.HardwareBuffer;
 import android.os.Handler;
 import android.os.Looper;
@@ -28,6 +29,7 @@ final class AutoPilotController {
     private long lastScreenshotRequestAt;
     private long unknownStartedAt;
     private int groundIndex;
+    private RectF lockedListRegion;
 
     AutoPilotController(GestureAccessibilityService service) {
         this.service = service;
@@ -35,18 +37,23 @@ final class AutoPilotController {
 
     boolean isActive() { return active; }
 
-    void start() {
+    void start(RectF listRegion) {
         stop();
         if (!AutoSettings.load(service).autoEnabled) {
             service.autoStatus("請先在 App 勾選允許自動操作");
             return;
         }
+        if (listRegion == null || listRegion.isEmpty()) {
+            service.autoStatus("條列框選範圍無效");
+            return;
+        }
+        lockedListRegion = new RectF(listRegion);
         active = true;
         generation++;
         blockedTargets.clear();
         groundIndex = 0;
         unknownStartedAt = 0L;
-        service.autoStatus("自動流程已啟動：全螢幕搜尋 Pokémon 條列");
+        service.autoStatus("自動流程已啟動：只掃描框選條列");
         schedule(400L, generation);
     }
 
@@ -56,6 +63,7 @@ final class AutoPilotController {
         screenshotPending = false;
         screenshotFailures = 0;
         unknownStartedAt = 0L;
+        lockedListRegion = null;
         handler.removeCallbacksAndMessages(null);
     }
 
@@ -79,7 +87,11 @@ final class AutoPilotController {
     ) {
         takeScreenshot(token, bitmap -> {
             AutoScreenAnalyzer.ScreenState state =
-                    AutoScreenAnalyzer.classifyAfterTap(bitmap, null);
+                    AutoScreenAnalyzer.classifyAfterTap(
+                            bitmap,
+                            null,
+                            AutoSettings.load(service)
+                    );
             int nextMatching = state == previous ? matching + 1 : 1;
             int required = AutoSettings.load(service).recognitionFrameCount;
             if (nextMatching < required) {
@@ -132,20 +144,17 @@ final class AutoPilotController {
                     scanList(bitmap, token);
                     break;
                 default:
-                    PokemonListDetector.Result list = PokemonListDetector.find(bitmap);
-                    if (list.foundPanel()) {
-                        unknownStartedAt = 0L;
-                        Log.i(LOG_TAG, "map fallback accepted from list panel");
-                        scanList(bitmap, token, list);
-                    } else {
-                        recycle(bitmap);
-                        unknown(token, "未知畫面：安全等待，不觸控");
-                    }
+                    recycle(bitmap);
+                    unknown(token, "未知畫面：安全等待，不觸控");
             }
     }
 
     private void scanList(Bitmap bitmap, int token) {
-        scanList(bitmap, token, PokemonListDetector.find(bitmap));
+        scanList(
+                bitmap,
+                token,
+                PokemonListDetector.findLocked(bitmap, lockedListRegion)
+        );
     }
 
     private void scanList(
@@ -199,7 +208,11 @@ final class AutoPilotController {
     private void classifyCandidateResult(PointF target, int token) {
         takeScreenshot(token, bitmap -> {
             AutoScreenAnalyzer.ScreenState state =
-                    AutoScreenAnalyzer.classifyAfterTap(bitmap, null);
+                    AutoScreenAnalyzer.classifyAfterTap(
+                            bitmap,
+                            null,
+                            AutoSettings.load(service)
+                    );
             recycle(bitmap);
             Log.i(LOG_TAG, "candidate result=" + state + " point=" + target);
             if (state == AutoScreenAnalyzer.ScreenState.ENCOUNTER) {

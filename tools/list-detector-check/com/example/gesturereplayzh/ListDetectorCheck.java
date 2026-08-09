@@ -16,7 +16,12 @@ public final class ListDetectorCheck {
             throw new IllegalArgumentException("image path [left top right bottom]");
         }
         Bitmap bitmap = new Bitmap(ImageIO.read(new File(args[0])));
-        PokemonListDetector.Result result = PokemonListDetector.find(bitmap);
+        RectF locked = args.length == 5 ? new RectF(
+                Float.parseFloat(args[1]), Float.parseFloat(args[2]),
+                Float.parseFloat(args[3]), Float.parseFloat(args[4])) : null;
+        PokemonListDetector.Result result = locked == null
+                ? PokemonListDetector.find(bitmap)
+                : PokemonListDetector.findLocked(bitmap, locked);
         System.out.println("panel=" + result.panel);
         System.out.println("confidence=" + result.confidence);
         System.out.println("equalsAnchor=" + result.equalsAnchor);
@@ -26,10 +31,8 @@ public final class ListDetectorCheck {
                 "panelScore", Bitmap.class, RectF.class);
         score.setAccessible(true);
         if (args.length == 5) {
-            RectF probe = new RectF(
-                    Float.parseFloat(args[1]), Float.parseFloat(args[2]),
-                    Float.parseFloat(args[3]), Float.parseFloat(args[4]));
-            System.out.println("probe=" + probe + " score=" + score.invoke(null, bitmap, probe));
+            System.out.println("probe=" + locked + " score=" +
+                    score.invoke(null, bitmap, locked));
         }
     }
 
