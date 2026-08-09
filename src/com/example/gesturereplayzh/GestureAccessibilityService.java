@@ -336,12 +336,14 @@ public final class GestureAccessibilityService extends AccessibilityService {
         ListRegionSelectionView selector = new ListRegionSelectionView(
                 this,
                 "步驟 1/2：框選寶可夢條列辨識區",
+                24f,
+                48f,
                 new ListRegionSelectionView.Listener() {
                     @Override
                     public void onSelected(RectF region) {
                         pendingListRegion = new RectF(region);
                         removeListRegionSelectionOverlay(false);
-                        beginGroundRegionSelection();
+                        beginMovementArrowSelection();
                     }
 
                     @Override
@@ -365,7 +367,7 @@ public final class GestureAccessibilityService extends AccessibilityService {
         windowManager.addView(selector, params);
     }
 
-    private void beginGroundRegionSelection() {
+    private void beginMovementArrowSelection() {
         if (windowManager == null || listRegionSelectionOverlay != null ||
                 pendingListRegion == null) {
             removeListRegionSelectionOverlay(true);
@@ -374,17 +376,22 @@ public final class GestureAccessibilityService extends AccessibilityService {
         }
         ListRegionSelectionView selector = new ListRegionSelectionView(
                 this,
-                "步驟 2/2：框選條列空白時可點的地板區",
+                "步驟 2/2：小框框住一個白色箭頭尖端（勿框中心）",
+                8f,
+                8f,
                 new ListRegionSelectionView.Listener() {
                     @Override
-                    public void onSelected(RectF groundRegion) {
+                    public void onSelected(RectF movementArrowRegion) {
                         RectF listRegion = new RectF(pendingListRegion);
                         pendingListRegion = null;
                         removeListRegionSelectionOverlay(true);
                         if (autoPilotController == null) return;
-                        autoPilotController.start(listRegion, groundRegion);
+                        autoPilotController.start(
+                                listRegion,
+                                movementArrowRegion
+                        );
                         setAutoPanelRunning(true);
-                        toast("兩個範圍已鎖定，自動流程開始");
+                        toast("條列與移動箭頭已鎖定，自動流程開始");
                     }
 
                     @Override
@@ -605,6 +612,15 @@ public final class GestureAccessibilityService extends AccessibilityService {
             float y,
             AutoTapCallback callback
     ) {
+        dispatchAutoPress(x, y, 80L, callback);
+    }
+
+    void dispatchAutoPress(
+            float x,
+            float y,
+            long durationMs,
+            AutoTapCallback callback
+    ) {
         if (gestureInFlight) {
             callback.onCancelled();
             return;
@@ -616,7 +632,10 @@ public final class GestureAccessibilityService extends AccessibilityService {
                         .addStroke(new GestureDescription.StrokeDescription(
                                 tapPath,
                                 0L,
-                                80L
+                                Math.max(100L, Math.min(
+                                        durationMs,
+                                        GestureDescription.getMaxGestureDuration()
+                                ))
                         ))
                         .build(),
                 new GestureResultCallback() {

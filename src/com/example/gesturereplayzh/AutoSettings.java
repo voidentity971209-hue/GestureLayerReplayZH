@@ -14,7 +14,7 @@ final class AutoSettings {
     long beforeCatchMs;
     long afterCatchMs;
     long afterExitMs;
-    long groundMoveWaitMs;
+    long movementHoldMs;
     int rocketTapCount;
     float rocketTapXRatio;
     float rocketTapYRatio;
@@ -50,6 +50,7 @@ final class AutoSettings {
                 .remove("exitYRatio")
                 .remove("catchGestureSourceId")
                 .remove("groundMoveRetries")
+                .remove("groundMoveWaitMs")
                 .remove("blockedDurationMs")
                 .apply();
         AutoSettings s = defaults();
@@ -62,7 +63,7 @@ final class AutoSettings {
         s.beforeCatchMs = readTime(p, "beforeCatchMs", s.beforeCatchMs);
         s.afterCatchMs = readTime(p, "afterCatchMs", s.afterCatchMs);
         s.afterExitMs = readTime(p, "afterExitMs", s.afterExitMs);
-        s.groundMoveWaitMs = readTime(p, "groundMoveWaitMs", s.groundMoveWaitMs);
+        s.movementHoldMs = readTime(p, "movementHoldMs", s.movementHoldMs);
         s.rocketTapCount = clamp(p.getInt("rocketTapCount", s.rocketTapCount), 1, 5);
         s.rocketTapXRatio = readRatio(p, "rocketTapXRatio", s.rocketTapXRatio);
         s.rocketTapYRatio = readRatio(p, "rocketTapYRatio", s.rocketTapYRatio);
@@ -92,7 +93,7 @@ final class AutoSettings {
                 .putLong("beforeCatchMs", normalizeTime(beforeCatchMs))
                 .putLong("afterCatchMs", normalizeTime(afterCatchMs))
                 .putLong("afterExitMs", normalizeTime(afterExitMs))
-                .putLong("groundMoveWaitMs", normalizeTime(groundMoveWaitMs))
+                .putLong("movementHoldMs", normalizeTime(movementHoldMs))
                 .putInt("rocketTapCount", clamp(rocketTapCount, 1, 5))
                 .putFloat("rocketTapXRatio", normalizeRatio(rocketTapXRatio))
                 .putFloat("rocketTapYRatio", normalizeRatio(rocketTapYRatio))
@@ -122,7 +123,7 @@ final class AutoSettings {
         s.beforeCatchMs = 700L;
         s.afterCatchMs = 2000L;
         s.afterExitMs = 1000L;
-        s.groundMoveWaitMs = 1200L;
+        s.movementHoldMs = 1000L;
         s.rocketTapCount = 2;
         s.rocketTapXRatio = .50f;
         s.rocketTapYRatio = .69f;

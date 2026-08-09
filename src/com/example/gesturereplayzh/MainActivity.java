@@ -178,7 +178,7 @@ public final class MainActivity extends Activity {
             ));
 
             TextView autoWarning = infoBox(
-                    "開始前請把地圖調成最大視野、最高角度。請依序框選條列辨識區與地板點擊區，並將其他懸浮物移出兩個區域。",
+                    "開始前請把地圖調成最大視野、最高角度。請依序框選條列辨識區，以及移動圓盤上的一個白色箭頭尖端；不要框圓盤中心。",
                     0xFFFFF3E0,
                     0xFF7A3E00
             );
@@ -612,7 +612,7 @@ public final class MainActivity extends Activity {
         );
         addFieldHelp(
                 fields,
-                "兩輪地圖掃描之間等待多久。數值越小反應越快，" +
+                "兩輪條列掃描之間等待多久。數值越小反應越快，" +
                         "但耗電、發熱與畫面尚未穩定就誤判的機率也會增加。"
         );
         EditText recognitionFrameCount = addIntegerField(
@@ -667,14 +667,15 @@ public final class MainActivity extends Activity {
                 "點擊候選後等待辨識（秒）",
                 settings.postTapClassifyDelayMs / 1000f
         );
-        EditText groundMoveWait = addNumberField(
+        EditText movementHold = addNumberField(
                 fields,
-                "點擊所選地板區後等待（秒）",
-                settings.groundMoveWaitMs / 1000f
+                "每次長按移動箭頭時間（秒）",
+                settings.movementHoldMs / 1000f
         );
         addFieldHelp(
                 fields,
-                "條列空白時只點所選地板區中央；每輪最多 1 次。"
+                "條列空白時，長按您框選的白色箭頭尖端；放開後重新掃描，" +
+                        "仍空白就繼續長按，出現寶可夢就停止移動。"
         );
         EditText unknownTimeout = addNumberField(
                 fields,
@@ -778,8 +779,8 @@ public final class MainActivity extends Activity {
                     listTapInterval, settings.listTapIntervalMs);
             settings.postTapClassifyDelayMs = seconds(
                     postTapClassifyDelay, settings.postTapClassifyDelayMs);
-            settings.groundMoveWaitMs = seconds(
-                    groundMoveWait, settings.groundMoveWaitMs);
+            settings.movementHoldMs = seconds(
+                    movementHold, settings.movementHoldMs);
             settings.unknownTimeoutMs = seconds(
                     unknownTimeout,
                     settings.unknownTimeoutMs

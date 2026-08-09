@@ -19,6 +19,8 @@ final class ListRegionSelectionView extends View {
     private final Listener listener;
     private final String instruction;
     private final float density;
+    private final float minimumWidth;
+    private final float minimumHeight;
     private final RectF selection = new RectF();
     private float startX;
     private float startY;
@@ -27,12 +29,16 @@ final class ListRegionSelectionView extends View {
     ListRegionSelectionView(
             Context context,
             String instruction,
+            float minimumWidthDp,
+            float minimumHeightDp,
             Listener listener
     ) {
         super(context);
         this.instruction = instruction;
         this.listener = listener;
         density = getResources().getDisplayMetrics().density;
+        minimumWidth = Math.max(4f, minimumWidthDp) * density;
+        minimumHeight = Math.max(4f, minimumHeightDp) * density;
         setBackgroundColor(Color.TRANSPARENT);
     }
 
@@ -95,8 +101,8 @@ final class ListRegionSelectionView extends View {
                 dragging = false;
                 updateSelection(x, y);
                 invalidate();
-                if (selection.width() < 24f * density ||
-                        selection.height() < 48f * density) {
+                if (selection.width() < minimumWidth ||
+                        selection.height() < minimumHeight) {
                     listener.onCancelled();
                 } else {
                     listener.onSelected(new RectF(selection));

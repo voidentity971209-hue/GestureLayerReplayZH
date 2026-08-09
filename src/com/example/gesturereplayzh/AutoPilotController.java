@@ -28,9 +28,8 @@ final class AutoPilotController {
     private int generation;
     private long lastScreenshotRequestAt;
     private long unknownStartedAt;
-    private boolean groundTapUsedThisRound;
     private RectF lockedListRegion;
-    private RectF lockedGroundRegion;
+    private RectF lockedMovementArrowRegion;
 
     AutoPilotController(GestureAccessibilityService service) {
         this.service = service;
@@ -38,7 +37,7 @@ final class AutoPilotController {
 
     boolean isActive() { return active; }
 
-    void start(RectF listRegion, RectF groundRegion) {
+    void start(RectF listRegion, RectF movementArrowRegion) {
         stop();
         if (!AutoSettings.load(service).autoEnabled) {
             service.autoStatus("請先在 App 勾選允許自動操作");
@@ -48,18 +47,17 @@ final class AutoPilotController {
             service.autoStatus("條列框選範圍無效");
             return;
         }
-        if (groundRegion == null || groundRegion.isEmpty()) {
-            service.autoStatus("地板點擊範圍無效");
+        if (movementArrowRegion == null || movementArrowRegion.isEmpty()) {
+            service.autoStatus("移動箭頭範圍無效");
             return;
         }
         lockedListRegion = new RectF(listRegion);
-        lockedGroundRegion = new RectF(groundRegion);
+        lockedMovementArrowRegion = new RectF(movementArrowRegion);
         active = true;
         generation++;
         blockedTargets.clear();
-        groundTapUsedThisRound = false;
         unknownStartedAt = 0L;
-        service.autoStatus("自動流程已啟動：地圖只使用兩個框選區");
+        service.autoStatus("自動流程已啟動：條列空白時長按所選箭頭");
         schedule(400L, generation);
     }
 
@@ -69,9 +67,8 @@ final class AutoPilotController {
         screenshotPending = false;
         screenshotFailures = 0;
         unknownStartedAt = 0L;
-        groundTapUsedThisRound = false;
         lockedListRegion = null;
-        lockedGroundRegion = null;
+        lockedMovementArrowRegion = null;
         handler.removeCallbacksAndMessages(null);
     }
 
@@ -189,21 +186,13 @@ final class AutoPilotController {
                 return;
             }
             recycle(bitmap);
-            if (groundTapUsedThisRound) {
-                service.autoStatus("本輪已點過地板區一次；只重新掃描條列");
-                schedule(AutoSettings.load(service).scanIntervalMs, token);
-                return;
-            }
-            PointF ground = selectedGroundPoint();
-            if (ground == null) {
-                service.autoStatus("地板框選區無效；已停止自動流程");
+            PointF arrow = selectedMovementArrowPoint();
+            if (arrow == null) {
+                service.autoStatus("移動箭頭框選區無效；已停止自動流程");
                 stop();
                 return;
             }
-            tap(ground.x, ground.y, token, () -> {
-                groundTapUsedThisRound = true;
-                schedule(AutoSettings.load(service).groundMoveWaitMs, token);
-            });
+            holdMovementArrow(arrow, token);
             return;
         }
         if (!isInsideLockedRegion(target)) {
@@ -212,7 +201,6 @@ final class AutoPilotController {
             schedule(AutoSettings.load(service).scanIntervalMs, token);
             return;
         }
-        groundTapUsedThisRound = false;
         recycle(bitmap);
         service.autoStatus("條列找到 " + result.candidates.size() +
                 " 個候選，點擊第一個");
@@ -315,14 +303,41 @@ final class AutoPilotController {
                 point.y <= lockedListRegion.bottom - verticalInset;
     }
 
-    private PointF selectedGroundPoint() {
-        if (lockedGroundRegion == null || lockedGroundRegion.isEmpty()) {
+    private PointF selectedMovementArrowPoint() {
+        if (lockedMovementArrowRegion == null ||
+                lockedMovementArrowRegion.isEmpty()) {
             return null;
         }
         android.graphics.Point size = ScreenDimensions.get(service);
-        float x = Math.max(0f, Math.min(size.x - 1f, lockedGroundRegion.centerX()));
-        float y = Math.max(0f, Math.min(size.y - 1f, lockedGroundRegion.centerY()));
+        float x = Math.max(0f, Math.min(
+                size.x - 1f, lockedMovementArrowRegion.centerX()));
+        float y = Math.max(0f, Math.min(
+                size.y - 1f, lockedMovementArrowRegion.centerY()));
         return new PointF(x, y);
+    }
+
+    private void holdMovementArrow(PointF arrow, int token) {
+        AutoSettings settings = AutoSettings.load(service);
+        service.autoStatus("條列沒有寶可夢：長按所選白色箭頭");
+        service.dispatchAutoPress(
+                arrow.x,
+                arrow.y,
+                settings.movementHoldMs,
+                new GestureAccessibilityService.AutoTapCallback() {
+                    @Override public void onCompleted() {
+                        if (isCurrent(token)) {
+                            schedule(settings.scanIntervalMs, token);
+                        }
+                    }
+
+                    @Override public void onCancelled() {
+                        if (isCurrent(token)) {
+                            service.autoStatus("移動長按被取消，稍後重試");
+                            schedule(settings.scanIntervalMs, token);
+                        }
+                    }
+                }
+        );
     }
 
     private void unknown(int token, String status) {
