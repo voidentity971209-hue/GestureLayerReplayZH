@@ -14,7 +14,7 @@ final class GestureBackup {
     static JSONObject create(Context context) throws JSONException {
         JSONObject root = new JSONObject();
         root.put("format", "GestureLayerReplayZH");
-        root.put("schemaVersion", 1);
+        root.put("schemaVersion", 3);
         root.put("exportedAt", System.currentTimeMillis());
 
         JSONArray activeLayers = new JSONArray();

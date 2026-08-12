@@ -8,9 +8,11 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.provider.Settings;
+import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -35,12 +37,16 @@ public final class MainActivity extends Activity {
     private LinearLayout layerContainer;
     private LinearLayout versionContainer;
     private TextView serviceStatus;
+    private TextView catchGestureInfo;
     private List<GestureLayer> layers;
     private List<SavedVersionStore.SavedVersion> versions;
+    private Runnable pendingPlayback;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        LegacyModelDataCleanup.run(this);
+        BuiltInGestureStore.ensureInstalled(this);
         buildUi();
     }
 
@@ -60,12 +66,20 @@ public final class MainActivity extends Activity {
         root.setPadding(dp(20), dp(24), dp(20), dp(36));
         scrollView.addView(root);
 
-        TextView title = text("分層手勢重播", 28f, Color.BLACK);
+        TextView title = text(
+                isExperimentalBuild()
+                        ? "刷機"
+                        : "大師球手勢模擬器",
+                28f,
+                Color.BLACK
+        );
         title.setTypeface(null, android.graphics.Typeface.BOLD);
         root.addView(title);
 
         TextView subtitle = text(
-                "分開錄製每一條滑動，再疊加成同一個手勢播放。永久免費、免 Root、不含廣告。",
+                isExperimentalBuild()
+                        ? "錄製、保存與播放手勢，也可啟動 Pokémon 條列自動操作。"
+                        : "分開錄製每一條滑動，再疊加成同一個手勢播放。永久免費、免 Root、不含廣告。",
                 16f,
                 0xFF444444
         );
@@ -77,10 +91,10 @@ public final class MainActivity extends Activity {
         serviceStatus.setBackgroundColor(0xFFE8EAF6);
         root.addView(serviceStatus);
 
-        Button accessibility = button("開啟無障礙服務設定");
-        accessibility.setOnClickListener(v ->
-                startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
-        root.addView(accessibility);
+        root.addView(sectionTitle(
+                "① 手勢模擬與編輯",
+                "錄製、疊加、排序與播放手勢。這一區不會判斷畫面內容。"
+        ));
 
         Button record = button("＋ 錄製新軌跡");
         record.setOnClickListener(v ->
@@ -133,10 +147,6 @@ public final class MainActivity extends Activity {
         saveVersion.setOnClickListener(v -> saveCurrentVersion());
         root.addView(saveVersion);
 
-        Button exportBackup = button("匯出手勢備份（傳送給開發者）");
-        exportBackup.setOnClickListener(v -> chooseBackupDestination());
-        root.addView(exportBackup);
-
         versionContainer = new LinearLayout(this);
         versionContainer.setOrientation(LinearLayout.VERTICAL);
         root.addView(versionContainer);
@@ -150,14 +160,7 @@ public final class MainActivity extends Activity {
         root.addView(playLoop);
 
         Button stop = button("停止播放");
-        stop.setOnClickListener(v -> {
-            GestureAccessibilityService service = GestureAccessibilityService.getInstance();
-            if (service != null) {
-                service.stopPlayback();
-            } else {
-                toast("服務尚未啟用");
-            }
-        });
+        stop.setOnClickListener(v -> stopPlayback());
         root.addView(stop);
 
         TextView warning = text(
@@ -168,19 +171,76 @@ public final class MainActivity extends Activity {
         warning.setPadding(dp(12), dp(16), dp(12), 0);
         root.addView(warning);
 
+        if (isExperimentalBuild()) {
+            root.addView(sectionTitle(
+                    "② 自動操作",
+                    "每次按下懸浮「自」後，開始自動捕捉寶可夢。"
+            ));
+
+            TextView autoWarning = infoBox(
+                    "開始前請把地圖調成最大視野、最高角度。先框選條列辨識區；第二步直接點一下移動圓盤上的白色箭頭尖端，不要點圓盤中心。",
+                    0xFFFFF3E0,
+                    0xFF7A3E00
+            );
+            root.addView(autoWarning);
+
+            CheckBox autoEnabled = new CheckBox(this);
+            autoEnabled.setText("允許啟動自動操作");
+            autoEnabled.setChecked(AutoSettings.load(this).autoEnabled);
+            autoEnabled.setOnCheckedChangeListener((buttonView, checked) -> {
+                AutoSettings settings = AutoSettings.load(this);
+                settings.autoEnabled = checked;
+                settings.save(this);
+                toast(checked ? "已允許自動操作" : "已停用自動操作");
+            });
+            root.addView(autoEnabled);
+
+            Button autoSettings = button("調整自動操作設定");
+            autoSettings.setOnClickListener(v -> showAutoSettingsDialog());
+            root.addView(autoSettings);
+
+            catchGestureInfo = text("", 14f, 0xFF455A64);
+            catchGestureInfo.setPadding(dp(12), dp(8), dp(12), dp(8));
+            root.addView(catchGestureInfo);
+
+        }
+
+        root.addView(sectionTitle(
+                isExperimentalBuild() ? "③ 權限與備份" : "② 權限與備份",
+                "管理無障礙服務並匯出手勢資料。更新 App 不會主動清除已保存手勢。"
+        ));
+
+        Button accessibility = button("開啟無障礙服務設定");
+        accessibility.setOnClickListener(v ->
+                startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
+        root.addView(accessibility);
+
+        Button exportBackup = button("匯出手勢備份（JSON）");
+        exportBackup.setOnClickListener(v -> chooseBackupDestination());
+        root.addView(exportBackup);
+
         setContentView(scrollView);
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (isFinishing()) {
+            stopPlayback();
+        }
+        super.onDestroy();
     }
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode != REQUEST_EXPORT_BACKUP ||
-                resultCode != RESULT_OK ||
+        if (resultCode != RESULT_OK ||
                 data == null ||
                 data.getData() == null) {
             return;
         }
-        writeBackup(data.getData());
+        if (requestCode == REQUEST_EXPORT_BACKUP) {
+            writeBackup(data.getData());
+        }
     }
 
     private void chooseBackupDestination() {
@@ -229,6 +289,7 @@ public final class MainActivity extends Activity {
             }
         }
         refreshVersions();
+        refreshCatchGestureInfo();
     }
 
     private void addLayerRow(int index, GestureLayer layer) {
@@ -512,6 +573,374 @@ public final class MainActivity extends Activity {
         return input;
     }
 
+    private void showAutoSettingsDialog() {
+        AutoSettings settings = AutoSettings.load(this);
+        LinearLayout dialogContent = new LinearLayout(this);
+        dialogContent.setOrientation(LinearLayout.VERTICAL);
+        dialogContent.setPadding(dp(8), 0, dp(8), dp(8));
+        dialogContent.setLayoutParams(new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                Math.round(
+                        getResources().getDisplayMetrics().heightPixels * 0.72f
+                )
+        ));
+
+        TextView explanation = text(
+                "可調整等待時間、次數，以及捕捉畫面要使用的判定項目。",
+                14f,
+                0xFF555555
+        );
+        explanation.setPadding(dp(12), dp(6), dp(12), dp(6));
+        dialogContent.addView(explanation);
+
+        ScrollView scroll = new ScrollView(this);
+        LinearLayout.LayoutParams scrollParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                0,
+                1f
+        );
+        dialogContent.addView(scroll, scrollParams);
+        LinearLayout fields = new LinearLayout(this);
+        fields.setOrientation(LinearLayout.VERTICAL);
+        fields.setPadding(dp(20), dp(8), dp(20), dp(8));
+        scroll.addView(fields);
+
+        EditText scanInterval = addNumberField(
+                fields,
+                "掃描間隔（秒，0.1 為單位）",
+                settings.scanIntervalMs / 1000f
+        );
+        addFieldHelp(
+                fields,
+                "兩輪條列掃描之間等待多久。數值越小反應越快，" +
+                        "但耗電、發熱與畫面尚未穩定就誤判的機率也會增加。"
+        );
+        EditText recognitionFrameCount = addIntegerField(
+                fields,
+                "畫面判定連續截圖數（1～5）",
+                settings.recognitionFrameCount
+        );
+        addFieldHelp(
+                fields,
+                "預設 1 張最省電；提高數量會較慢。條列位置每次動作後都會重新掃描。"
+        );
+        TextView encounterCriteriaTitle = text(
+                "捕捉畫面判定項目（至少勾選一項）",
+                16f,
+                Color.BLACK
+        );
+        encounterCriteriaTitle.setPadding(0, dp(14), 0, dp(4));
+        fields.addView(encounterCriteriaTitle);
+        CheckBox encounterUseCamera = new CheckBox(this);
+        encounterUseCamera.setText("上方中央相機區");
+        encounterUseCamera.setChecked(settings.encounterUseCamera);
+        fields.addView(encounterUseCamera);
+        CheckBox encounterUseCpPanel = new CheckBox(this);
+        encounterUseCpPanel.setText("名稱／CP 區域");
+        encounterUseCpPanel.setChecked(settings.encounterUseCpPanel);
+        fields.addView(encounterUseCpPanel);
+        CheckBox encounterUseSideDocks = new CheckBox(this);
+        encounterUseSideDocks.setText("左下樹果與右下球種功能欄");
+        encounterUseSideDocks.setChecked(settings.encounterUseSideDocks);
+        fields.addView(encounterUseSideDocks);
+        CheckBox encounterUseBall = new CheckBox(this);
+        encounterUseBall.setText("下方中央大型精靈球");
+        encounterUseBall.setChecked(settings.encounterUseBall);
+        fields.addView(encounterUseBall);
+        addFieldHelp(
+                fields,
+                "勾選的項目都必須成立才會播放捕捉手勢。" +
+                        "若某個外掛介面經常遮住某一項，可以取消該項。"
+        );
+        EditText listTapCount = addIntegerField(
+                fields,
+                "條列候選連續點擊次數（1～4）",
+                settings.listTapCount
+        );
+        EditText listTapInterval = addNumberField(
+                fields,
+                "條列連點間隔（秒）",
+                settings.listTapIntervalMs / 1000f
+        );
+        EditText postTapClassifyDelay = addNumberField(
+                fields,
+                "點擊候選後等待辨識（秒）",
+                settings.postTapClassifyDelayMs / 1000f
+        );
+        EditText movementHold = addNumberField(
+                fields,
+                "每次長按移動箭頭時間（秒）",
+                settings.movementHoldMs / 1000f
+        );
+        addFieldHelp(
+                fields,
+                "條列空白時，長按您框選的白色箭頭尖端；放開後重新掃描，" +
+                        "仍空白就繼續長按，出現寶可夢就停止移動。"
+        );
+        EditText unknownTimeout = addNumberField(
+                fields,
+                "未知畫面安全停止時間（秒）",
+                settings.unknownTimeoutMs / 1000f
+        );
+        EditText rocketInterval = addNumberField(
+                fields,
+                "火箭隊每次對話點擊間隔（秒）",
+                settings.rocketTapIntervalMs / 1000f
+        );
+        addFieldHelp(
+                fields,
+                "每次推進火箭隊對話之間的等待時間。太短可能漏掉尚未出現的對話。"
+        );
+        EditText rocketCount = addIntegerField(
+                fields,
+                "火箭隊對話點擊次數",
+                settings.rocketTapCount
+        );
+        addFieldHelp(fields, "進入火箭隊畫面後，先點擊對話區幾次再尋找 X。");
+        EditText beforeCatch = addNumberField(
+                fields,
+                "確認捕捉畫面後等待（秒）",
+                settings.beforeCatchMs / 1000f
+        );
+        addFieldHelp(
+                fields,
+                "確認捕捉介面成立後，等待畫面與球穩定再播放捕捉手勢。"
+        );
+        EditText afterCatch = addNumberField(
+                fields,
+                "播放捕捉手勢後等待（秒）",
+                settings.afterCatchMs / 1000f
+        );
+        addFieldHelp(
+                fields,
+                "手勢送出後等待結果動畫的時間；之後程式才會重新判斷畫面。"
+        );
+        EditText afterExit = addNumberField(
+                fields,
+                "按 X 後等待（秒）",
+                settings.afterExitMs / 1000f
+        );
+        addFieldHelp(
+                fields,
+                "退出補給站、道館或其他頁面後，等待地圖重新顯示的時間。"
+        );
+        TextView catchSourceNotice = text(
+                "捕捉時會播放主畫面的「目前手勢」，" +
+                        "不會讀取任何保存版本。",
+                14f,
+                0xFF1B5E20
+        );
+        catchSourceNotice.setPadding(dp(8), dp(12), dp(8), dp(12));
+        fields.addView(catchSourceNotice);
+
+        LinearLayout actions = new LinearLayout(this);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        actions.setGravity(Gravity.CENTER_VERTICAL);
+        actions.setPadding(dp(4), dp(4), dp(4), 0);
+        Button reset = compactButton("恢復預設");
+        Button cancel = compactButton("取消");
+        Button save = compactButton("保存");
+        actions.addView(reset);
+        actions.addView(cancel);
+        actions.addView(save);
+        dialogContent.addView(actions);
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("自動操作設定")
+                .setView(dialogContent)
+                .create();
+
+        reset.setOnClickListener(v -> {
+            AutoSettings.reset(this);
+            dialog.dismiss();
+            refreshCatchGestureInfo();
+            toast("已恢復預設操作設定");
+        });
+        cancel.setOnClickListener(v -> dialog.dismiss());
+        save.setOnClickListener(v -> {
+            if (!encounterUseCamera.isChecked() &&
+                    !encounterUseCpPanel.isChecked() &&
+                    !encounterUseSideDocks.isChecked() &&
+                    !encounterUseBall.isChecked()) {
+                toast("捕捉畫面判定至少要勾選一項");
+                return;
+            }
+            settings.scanIntervalMs =
+                    seconds(scanInterval, settings.scanIntervalMs);
+            settings.recognitionFrameCount = integerValue(
+                    recognitionFrameCount,
+                    settings.recognitionFrameCount,
+                    1,
+                    5
+            );
+            settings.listTapCount = integerValue(
+                    listTapCount, settings.listTapCount, 1, 4);
+            settings.listTapIntervalMs = seconds(
+                    listTapInterval, settings.listTapIntervalMs);
+            settings.postTapClassifyDelayMs = seconds(
+                    postTapClassifyDelay, settings.postTapClassifyDelayMs);
+            settings.movementHoldMs = seconds(
+                    movementHold, settings.movementHoldMs);
+            settings.unknownTimeoutMs = seconds(
+                    unknownTimeout,
+                    settings.unknownTimeoutMs
+            );
+            settings.rocketTapIntervalMs =
+                    seconds(rocketInterval, settings.rocketTapIntervalMs);
+            settings.beforeCatchMs =
+                    seconds(beforeCatch, settings.beforeCatchMs);
+            settings.afterCatchMs =
+                    seconds(afterCatch, settings.afterCatchMs);
+            settings.afterExitMs =
+                    seconds(afterExit, settings.afterExitMs);
+            settings.rocketTapCount =
+                    integerValue(rocketCount, settings.rocketTapCount, 1, 5);
+            settings.encounterUseCamera = encounterUseCamera.isChecked();
+            settings.encounterUseCpPanel = encounterUseCpPanel.isChecked();
+            settings.encounterUseSideDocks = encounterUseSideDocks.isChecked();
+            settings.encounterUseBall = encounterUseBall.isChecked();
+            settings.save(this);
+            dialog.dismiss();
+            refreshCatchGestureInfo();
+            toast("已保存自動操作設定");
+        });
+        dialog.show();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setLayout(
+                    Math.round(
+                            getResources().getDisplayMetrics().widthPixels * 0.94f
+                    ),
+                    Math.round(
+                            getResources().getDisplayMetrics().heightPixels * 0.86f
+                    )
+            );
+        }
+    }
+
+    private void refreshCatchGestureInfo() {
+        if (catchGestureInfo == null) {
+            return;
+        }
+        List<GestureLayer> currentLayers = GestureStore.load(this);
+        if (currentLayers.isEmpty()) {
+            catchGestureInfo.setText(
+                    "自動捕捉：目前沒有可播放軌跡。\n" +
+                            "請先錄製手勢或套用一個保存版本。"
+            );
+            return;
+        }
+        long totalDuration = GestureIdentity.totalDuration(currentLayers);
+        catchGestureInfo.setText(
+                "自動捕捉會播放目前手勢：" + currentLayers.size() +
+                        " 條，總長 " + formatSeconds(totalDuration) + " 秒。"
+        );
+    }
+
+    private EditText addTextField(
+            LinearLayout parent,
+            String label,
+            String value
+    ) {
+        parent.addView(text(label, 13f, 0xFF555555));
+        EditText input = new EditText(this);
+        input.setSingleLine(false);
+        input.setMaxLines(3);
+        input.setText(value);
+        parent.addView(input);
+        return input;
+    }
+
+    private void addFieldHelp(LinearLayout parent, String value) {
+        TextView help = text(value, 12f, 0xFF6D6D6D);
+        help.setPadding(0, 0, 0, dp(10));
+        parent.addView(help);
+    }
+
+    private EditText addNumberField(
+            LinearLayout parent,
+            String label,
+            float value
+    ) {
+        parent.addView(text(label, 13f, 0xFF555555));
+        EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setInputType(
+                InputType.TYPE_CLASS_NUMBER |
+                        InputType.TYPE_NUMBER_FLAG_DECIMAL
+        );
+        input.setText(String.format(Locale.TAIWAN, "%.1f", value));
+        parent.addView(input);
+        return input;
+    }
+
+    private EditText addIntegerField(
+            LinearLayout parent,
+            String label,
+            int value
+    ) {
+        parent.addView(text(label, 13f, 0xFF555555));
+        EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setInputType(InputType.TYPE_CLASS_NUMBER);
+        input.setText(String.valueOf(value));
+        parent.addView(input);
+        return input;
+    }
+
+    private String nonEmpty(EditText input, String fallback) {
+        String value = input.getText().toString().trim();
+        return value.isEmpty() ? fallback : value;
+    }
+
+    private long seconds(EditText input, long fallback) {
+        try {
+            float value = Float.parseFloat(input.getText().toString());
+            return Math.max(
+                    100L,
+                    Math.min(60000L, Math.round(value * 10f) * 100L)
+            );
+        } catch (NumberFormatException ignored) {
+            return fallback;
+        }
+    }
+
+    private int integerValue(
+            EditText input,
+            int fallback,
+            int minimum,
+            int maximum
+    ) {
+        try {
+            return Math.max(
+                    minimum,
+                    Math.min(maximum, Integer.parseInt(input.getText().toString()))
+            );
+        } catch (NumberFormatException ignored) {
+            return fallback;
+        }
+    }
+
+    private float numberValue(EditText input, float fallback) {
+        try {
+            return Float.parseFloat(input.getText().toString());
+        } catch (NumberFormatException ignored) {
+            return fallback;
+        }
+    }
+
+    private float percentage(EditText input, float fallback) {
+        try {
+            float value = Float.parseFloat(input.getText().toString()) / 100f;
+            return Math.max(0.02f, Math.min(0.98f, value));
+        } catch (NumberFormatException ignored) {
+            return fallback;
+        }
+    }
+
+    private boolean isExperimentalBuild() {
+        return getPackageName().endsWith(".autoexperimental");
+    }
+
     private void play(boolean loop) {
         layers = GestureStore.load(this);
         if (layers.isEmpty()) {
@@ -525,7 +954,30 @@ public final class MainActivity extends Activity {
             return;
         }
         moveTaskToBack(true);
-        handler.postDelayed(() -> service.play(GestureStore.load(this), loop), 1200L);
+        cancelPendingPlayback();
+        pendingPlayback = () -> {
+            pendingPlayback = null;
+            service.play(GestureStore.load(this), loop);
+        };
+        handler.postDelayed(pendingPlayback, 1200L);
+    }
+
+    private void stopPlayback() {
+        cancelPendingPlayback();
+        GestureAccessibilityService service =
+                GestureAccessibilityService.getInstance();
+        if (service != null) {
+            service.stopPlayback();
+        } else {
+            toast("服務尚未啟用");
+        }
+    }
+
+    private void cancelPendingPlayback() {
+        if (pendingPlayback != null) {
+            handler.removeCallbacks(pendingPlayback);
+            pendingPlayback = null;
+        }
     }
 
     private TextView text(String value, float size, int color) {
@@ -534,6 +986,38 @@ public final class MainActivity extends Activity {
         view.setTextSize(size);
         view.setTextColor(color);
         view.setLineSpacing(0f, 1.15f);
+        return view;
+    }
+
+    private TextView sectionTitle(String title, String description) {
+        TextView view = text(
+                title + "\n" + description,
+                14f,
+                0xFF303F9F
+        );
+        view.setTextSize(14f);
+        view.setTypeface(null, android.graphics.Typeface.BOLD);
+        view.setPadding(dp(14), dp(12), dp(14), dp(12));
+        view.setBackgroundColor(0xFFE8EAF6);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+        );
+        params.setMargins(0, dp(24), 0, dp(8));
+        view.setLayoutParams(params);
+        return view;
+    }
+
+    private TextView infoBox(String value, int backgroundColor, int textColor) {
+        TextView view = text(value, 14f, textColor);
+        view.setPadding(dp(12), dp(12), dp(12), dp(12));
+        view.setBackgroundColor(backgroundColor);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+        );
+        params.setMargins(0, dp(4), 0, dp(8));
+        view.setLayoutParams(params);
         return view;
     }
 

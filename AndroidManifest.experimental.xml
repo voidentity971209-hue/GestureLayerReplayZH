@@ -1,22 +1,28 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest
     xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.example.gesturereplayzh">
+    package="com.example.gesturereplayzh.autoexperimental"
+    android:versionCode="39"
+    android:versionName="0.17.8-experimental">
+
+    <uses-sdk android:minSdkVersion="30" android:targetSdkVersion="36" />
+
     <application
         android:allowBackup="true"
+        android:extractNativeLibs="true"
         android:icon="@drawable/ic_launcher_master"
-        android:label="@string/app_name"
+        android:label="刷機"
         android:supportsRtl="true"
         android:theme="@style/Theme.GestureReplay">
 
         <activity
-            android:name=".RecordActivity"
+            android:name="com.example.gesturereplayzh.RecordActivity"
             android:excludeFromRecents="true"
             android:exported="false"
             android:theme="@style/Theme.GestureReplay.Transparent" />
 
         <activity
-            android:name=".MainActivity"
+            android:name="com.example.gesturereplayzh.MainActivity"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -25,17 +31,17 @@
         </activity>
 
         <service
-            android:name=".GestureAccessibilityService"
-            android:description="@string/accessibility_description"
+            android:name="com.example.gesturereplayzh.GestureAccessibilityService"
+            android:description="@string/accessibility_description_experimental"
             android:exported="true"
-            android:label="@string/accessibility_label"
+            android:label="@string/accessibility_label_experimental"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
             <intent-filter>
                 <action android:name="android.accessibilityservice.AccessibilityService" />
             </intent-filter>
             <meta-data
                 android:name="android.accessibilityservice"
-                android:resource="@xml/accessibility_service" />
+                android:resource="@xml/accessibility_service_experimental" />
         </service>
     </application>
 </manifest>

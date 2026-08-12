@@ -5,6 +5,7 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Path;
+import android.graphics.Point;
 import android.graphics.PointF;
 import android.os.Bundle;
 import android.view.Gravity;
@@ -106,6 +107,9 @@ public final class RecordActivity extends Activity {
             if (action == MotionEvent.ACTION_DOWN) {
                 layer = new GestureLayer();
                 layer.startDelayMs = 0L;
+                Point screen = ScreenDimensions.get(RecordActivity.this);
+                layer.sourceWidth = screen.x;
+                layer.sourceHeight = screen.y;
                 layer.points.clear();
                 drawnPath.reset();
                 pointerId = event.getPointerId(0);
